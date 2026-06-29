@@ -72,9 +72,10 @@ const TL_SYNC = (() => {
       let day, month, year;
 
       if (dateParts.length === 3) {
-        day = parseInt(dateParts[0]);
-        month = parseInt(dateParts[1]) - 1; // JS months are 0-indexed
-        year = parseInt(dateParts[2]);
+        // WhatsApp exports in M/D/YY format (e.g. 3/28/26 = March 28, 2026)
+        month = parseInt(dateParts[0]) - 1; // JS months are 0-indexed
+        day   = parseInt(dateParts[1]);
+        year  = parseInt(dateParts[2]);
         if (year < 100) year += 2000;
       }
 
