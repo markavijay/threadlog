@@ -159,11 +159,18 @@ const TL_APP = (() => {
     showView('view-timeline');
   }
 
+  function refreshContactHeader() {
+    if (!_currentContact) return;
+    document.getElementById('tl-sub').textContent = _lastActivityLabel(_currentContact.id);
+  }
+
   function _lastActivityLabel(contactId) {
     const entries = TL_DB.getEntries(contactId, { limit: 1 });
     if (!entries.length) return 'No activity yet';
     const ts = entries[0].timestamp;
     const diff = Date.now() - ts;
+    if (diff < 0) return `Last activity ${new Date(ts).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`;
+    if (diff < 60000) return 'Last activity just now';
     if (diff < 3600000) return `Last activity ${Math.floor(diff / 60000)}m ago`;
     if (diff < 86400000) return 'Last activity today';
     if (diff < 172800000) return 'Last activity yesterday';
@@ -352,6 +359,7 @@ const TL_APP = (() => {
     get currentContact() { return _currentContact; },
     get activeTypeFilter() { return _activeTypeFilter; },
     get activeTopicId() { return _activeTopicId; },
+    refreshContactHeader,
     _esc,
     _relDate,
   };

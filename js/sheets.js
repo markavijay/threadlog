@@ -432,7 +432,14 @@ const TL_SHEETS = (() => {
 
   function _saveEntry(type, contact) {
     const dtVal = document.getElementById('ae-datetime')?.value;
-    const timestamp = dtVal ? new Date(dtVal).getTime() : Date.now();
+    // datetime-local gives "YYYY-MM-DDTHH:MM" — parse as local time, not UTC
+    let timestamp = Date.now();
+    if (dtVal) {
+      const [datePart, timePart] = dtVal.split('T');
+      const [y, mo, d] = datePart.split('-').map(Number);
+      const [h, mi] = (timePart || '00:00').split(':').map(Number);
+      timestamp = new Date(y, mo - 1, d, h, mi).getTime();
+    }
 
     // Direction
     const dirBtn = document.querySelector('.dir-btn.active');
@@ -494,7 +501,8 @@ const TL_SHEETS = (() => {
     close();
     TL_APP.toast('Entry saved');
 
-    // Refresh timeline
+    // Refresh timeline + header subtitle
+    TL_APP.refreshContactHeader();
     TL_TIMELINE.renderTopics(TL_DB.getContact(contact.id));
     TL_TIMELINE.renderEntries(contact.id, {
       type: TL_APP.activeTypeFilter === 'all' ? null : TL_APP.activeTypeFilter,
