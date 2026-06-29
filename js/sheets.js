@@ -87,11 +87,20 @@ const TL_SHEETS = (() => {
         <div class="form-section-label">Duration</div>
         <div class="form-field">
           <i class="ti ti-clock form-field-icon"></i>
-          <div class="form-field-inner" style="display:flex;align-items:center;gap:8px">
-            <input type="number" id="ae-dur-h" min="0" max="23" placeholder="0" class="form-input" style="width:48px;text-align:center" />
-            <span style="color:var(--text-tertiary);font-size:13px">hr</span>
-            <input type="number" id="ae-dur-m" min="0" max="59" placeholder="0" class="form-input" style="width:48px;text-align:center" />
-            <span style="color:var(--text-tertiary);font-size:13px">min</span>
+          <div class="form-field-inner">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+              <input type="number" id="ae-dur-h" min="0" max="23" placeholder="0" class="form-input" style="width:48px;text-align:center" />
+              <span style="color:var(--text-tertiary);font-size:13px">hr</span>
+              <input type="number" id="ae-dur-m" min="0" max="59" placeholder="0" class="form-input" style="width:48px;text-align:center" />
+              <span style="color:var(--text-tertiary);font-size:13px">min</span>
+              <input type="number" id="ae-dur-s" min="0" max="59" placeholder="0" class="form-input" style="width:48px;text-align:center" />
+              <span style="color:var(--text-tertiary);font-size:13px">sec</span>
+            </div>
+            <button id="ae-timer-btn" style="display:flex;align-items:center;gap:8px;padding:8px 14px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--bg-secondary);font-size:13px;color:var(--text-primary);font-family:var(--font);cursor:pointer;width:100%">
+              <i class="ti ti-player-play" id="ae-timer-icon"></i>
+              <span id="ae-timer-label">Start call timer</span>
+              <span id="ae-timer-display" style="margin-left:auto;font-variant-numeric:tabular-nums;font-weight:500;color:var(--tl-accent);display:none">0:00</span>
+            </button>
           </div>
         </div>`;
     }
@@ -294,6 +303,57 @@ const TL_SHEETS = (() => {
       });
     });
 
+    // Call timer
+    if (type === 'call') {
+      let _timerInterval = null;
+      let _timerSeconds = 0;
+      let _timerRunning = false;
+
+      const timerBtn = document.getElementById('ae-timer-btn');
+      const timerIcon = document.getElementById('ae-timer-icon');
+      const timerLabel = document.getElementById('ae-timer-label');
+      const timerDisplay = document.getElementById('ae-timer-display');
+
+      function _updateTimerDisplay() {
+        const h = Math.floor(_timerSeconds / 3600);
+        const m = Math.floor((_timerSeconds % 3600) / 60);
+        const s = _timerSeconds % 60;
+        timerDisplay.textContent = h > 0
+          ? `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`
+          : `${m}:${String(s).padStart(2,'0')}`;
+      }
+
+      timerBtn && timerBtn.addEventListener('click', () => {
+        if (!_timerRunning) {
+          // Start
+          _timerRunning = true;
+          timerIcon.className = 'ti ti-player-stop';
+          timerLabel.textContent = 'Stop timer';
+          timerDisplay.style.display = 'block';
+          timerBtn.style.borderColor = 'var(--tl-accent)';
+          timerBtn.style.background = 'var(--tl-accent-light)';
+          _timerInterval = setInterval(() => {
+            _timerSeconds++;
+            _updateTimerDisplay();
+          }, 1000);
+        } else {
+          // Stop — fill in duration fields
+          clearInterval(_timerInterval);
+          _timerRunning = false;
+          timerIcon.className = 'ti ti-player-play';
+          timerLabel.textContent = 'Start call timer';
+          timerBtn.style.borderColor = '';
+          timerBtn.style.background = '';
+          const h = Math.floor(_timerSeconds / 3600);
+          const m = Math.floor((_timerSeconds % 3600) / 60);
+          const s = _timerSeconds % 60;
+          document.getElementById('ae-dur-h').value = h || '';
+          document.getElementById('ae-dur-m').value = m || '';
+          document.getElementById('ae-dur-s').value = s || '';
+        }
+      });
+    }
+
     // WhatsApp file import
     if (type === 'wa') {
       document.getElementById('ae-wa-file')?.addEventListener('change', e => {
@@ -381,7 +441,8 @@ const TL_SHEETS = (() => {
     // Duration
     const durH = parseInt(document.getElementById('ae-dur-h')?.value || 0);
     const durM = parseInt(document.getElementById('ae-dur-m')?.value || 0);
-    const duration_s = (durH * 3600 + durM * 60) || null;
+    const durS = parseInt(document.getElementById('ae-dur-s')?.value || 0);
+    const duration_s = (durH * 3600 + durM * 60 + durS) || null;
 
     // Topics
     const topic_names = [];

@@ -122,10 +122,16 @@ const TL_TIMELINE = (() => {
     // Build body text
     let body = '';
     if (e.type === 'call') {
-      const dir = e.direction === 'in' ? 'Incoming' : e.direction === 'missed' ? 'Missed' : 'Outgoing';
-      const dur = e.duration_s ? ` · ${_formatDuration(e.duration_s)}` : '';
-      body += `<strong>${dir}${dur}</strong>`;
-      if (e.body) body += `<br>${TL_APP._esc(e.body)}`;
+      const dirIcon = e.direction === 'in'
+        ? '<i class="ti ti-phone-incoming" style="font-size:12px;color:var(--tl-accent)"></i>'
+        : e.direction === 'missed'
+        ? '<i class="ti ti-phone-missed" style="font-size:12px;color:#E24B4A"></i>'
+        : '<i class="ti ti-phone-outgoing" style="font-size:12px;color:var(--text-tertiary)"></i>';
+      const dirLabel = e.direction === 'in' ? 'Incoming' : e.direction === 'missed' ? 'Missed call' : 'Outgoing';
+      const dur = e.duration_s ? ` · <span style="color:var(--text-secondary)">${_formatDuration(e.duration_s)}</span>` : '';
+      const missedStyle = e.direction === 'missed' ? 'color:#E24B4A;' : '';
+      body += `<span style="display:inline-flex;align-items:center;gap:5px;${missedStyle}font-weight:500">${dirIcon} ${dirLabel}${dur}</span>`;
+      if (e.body) body += `<br><span style="color:var(--text-secondary);font-size:13px">${TL_APP._esc(e.body)}</span>`;
     } else if (e.type === 'email') {
       if (e.subject) body += `<strong>${TL_APP._esc(e.subject)}</strong>`;
       if (e.body) body += (body ? '<br>' : '') + TL_APP._esc(e.body);
@@ -183,7 +189,7 @@ const TL_TIMELINE = (() => {
     const m = Math.floor((secs % 3600) / 60);
     const s = secs % 60;
     if (h > 0) return `${h}h ${m}m`;
-    if (m > 0) return `${m} min`;
+    if (m > 0) return s > 0 ? `${m}m ${s}s` : `${m} min`;
     return `${s}s`;
   }
 
