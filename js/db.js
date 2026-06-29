@@ -9,7 +9,7 @@
  * All public functions return Promises.
  */
 
-const TL_DB = (() => {
+var TL_DB = (function() {
 
   let _db = null;       // sql.js Database instance
   let _SQL = null;      // sql.js module
@@ -116,6 +116,7 @@ const TL_DB = (() => {
     // Load sql.js WASM
     _SQL = await initSqlJs({
       locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/${file}`
+    });
 
     const saved = await _loadFromStorage();
     if (saved) {
@@ -451,8 +452,19 @@ const TL_DB = (() => {
     const vals = allowed.filter(f => fields[f] !== undefined).map(f => fields[f]);
     if (sets.length) _run(`UPDATE entries SET ${sets.join(', ')}, updated_at = ? WHERE id = ?`, [...vals, _now(), id]);
     if (fields.topic_names) {
-      const entry = _first(_db.prepare(`SELECT contact_id FROM entries WHERE id = ?`).bindAndStep([id]) && _db.prepare(`SELECT contact_id FROM entries WHERE id = ?`));
+      const _stmt = _db.prepare(`SELECT contact_id FROM entries WHERE id = ?`);
+      _stmt.bind([id]);
+      const entry = _first(_stmt);
       _db.run(`DELETE FROM entry_topics WHERE entry_id = ?`, [id]);
+      if (entry) {
+        fields.topic_names.forEach(name => {
+          const topicId = createTopic(entry.contact_id, name);
+          if (topicId) {
+            try { _run(`INSERT OR IGNORE INTO entry_topics(entry_id, topic_id) VALUES(?,?)`, [id, topicId]); }
+            catch(e) { /* duplicate */ }
+          }
+        });
+      }
     }
   }
 
@@ -594,7 +606,7 @@ const TL_DB = (() => {
     _db: () => _db,
   };
 
-})();
+}());
 
 // Make globally available
 window.TL_DB = TL_DB;
