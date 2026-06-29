@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#1D9E75" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="ThreadLog" />
+  <meta name="description" content="Contact-centric activity timeline. Every touchpoint in one scroll." />
+
+  <title>ThreadLog</title>
+
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png" />
+
+  <!-- Tabler Icons -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css" />
+
+  <!-- sql.js WASM (SQLite in the browser) -->
+  <script src="sql-wasm.js"></script>
+
+  <style>
+    /* ── Reset & Tokens ───────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --tl-accent:        #1D9E75;
+      --tl-accent-dark:   #0F6E56;
+      --tl-accent-light:  #E1F5EE;
+      --tl-accent-text:   #085041;
+
+      --bg:               #ffffff;
+      --bg-secondary:     #F7F7F6;
+      --bg-tertiary:      #EFEFED;
+      --border:           #E8E8E5;
+      --border-strong:    #D0D0CB;
+
+      --text-primary:     #1A1A18;
+      --text-secondary:   #5C5C58;
+      --text-tertiary:    #9B9B95;
+
+      --radius-sm:        6px;
+      --radius-md:        10px;
+      --radius-lg:        14px;
+      --radius-xl:        20px;
+
+      --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      --font-mono: 'SF Mono', 'Fira Code', monospace;
+
+      --safe-top:    env(safe-area-inset-top, 0px);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+
+      /* Entry type colours */
+      --c-call:   #E1F5EE; --c-call-fg:   #085041;
+      --c-sms:    #E6F1FB; --c-sms-fg:    #0C447C;
+      --c-email:  #FAEEDA; --c-email-fg:  #633806;
+      --c-meet:   #EEEDFE; --c-meet-fg:   #3C3489;
+      --c-wa:     #EAF3DE; --c-wa-fg:     #27500A;
+      --c-doc:    #FAECE7; --c-doc-fg:    #712B13;
+      --c-note:   #F5F5F3; --c-note-fg:   #4A4A46;
+    }
+
+    html, body {
+      height: 100%;
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text-primary);
+      -webkit-font-smoothing: antialiased;
+      overscroll-behavior: none;
+    }
+
+    /* ── App Shell ────────────────────────────────────────────────────────── */
+    #app {
+      height: 100%;
+      max-width: 480px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* ── Loading Screen ───────────────────────────────────────────────────── */
+    #loading-screen {
+      position: absolute; inset: 0;
+      background: var(--bg);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 16px; z-index: 100;
+      transition: opacity 0.3s;
+    }
+    #loading-screen.hidden { opacity: 0; pointer-events: none; }
+    .loading-logo {
+      width: 64px; height: 64px; border-radius: 18px;
+      background: var(--tl-accent-light);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 30px; color: var(--tl-accent-text);
+    }
+    .loading-name { font-size: 20px; font-weight: 600; color: var(--text-primary); }
+    .loading-spinner {
+      width: 24px; height: 24px; border-radius: 50%;
+      border: 2px solid var(--border);
+      border-top-color: var(--tl-accent);
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Views ────────────────────────────────────────────────────────────── */
+    .view { display: none; flex-direction: column; flex: 1; overflow: hidden; }
+    .view.active { display: flex; }
+
+    /* ── Top bar ──────────────────────────────────────────────────────────── */
+    .topbar {
+      display: flex; align-items: center; gap: 8px;
+      padding: calc(var(--safe-top) + 12px) 16px 12px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+      flex-shrink: 0;
+    }
+    .topbar-title { font-size: 17px; font-weight: 600; color: var(--text-primary); flex: 1; }
+    .icon-btn {
+      width: 36px; height: 36px; border-radius: var(--radius-md);
+      background: none; border: none; cursor: pointer;
+      color: var(--text-secondary); font-size: 20px;
+      display: flex; align-items: center; justify-content: center;
+      transition: background 0.15s;
+    }
+    .icon-btn:hover, .icon-btn:focus-visible { background: var(--bg-secondary); outline: none; }
+    .back-btn { color: var(--tl-accent); font-size: 22px; }
+    .text-btn { font-size: 15px; font-weight: 500; color: var(--tl-accent); background: none; border: none; cursor: pointer; padding: 4px 2px; }
+
+    /* ── Search ───────────────────────────────────────────────────────────── */
+    .search-wrap {
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+      flex-shrink: 0;
+    }
+    .search-inner {
+      display: flex; align-items: center; gap: 8px;
+      background: var(--bg-secondary); border-radius: var(--radius-xl);
+      padding: 8px 14px;
+    }
+    .search-inner i { color: var(--text-tertiary); font-size: 16px; }
+    .search-inner input {
+      flex: 1; border: none; background: none; outline: none;
+      font-size: 15px; color: var(--text-primary); font-family: var(--font);
+    }
+    .search-inner input::placeholder { color: var(--text-tertiary); }
+    .search-clear { color: var(--text-tertiary); background: none; border: none; cursor: pointer; font-size: 16px; display: none; }
+    .search-clear.visible { display: flex; }
+
+    /* ── Contact List ─────────────────────────────────────────────────────── */
+    .contact-list { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+    .list-section-label {
+      font-size: 11px; font-weight: 600; letter-spacing: 0.07em;
+      text-transform: uppercase; color: var(--text-tertiary);
+      padding: 12px 16px 4px;
+    }
+    .contact-row {
+      display: flex; align-items: center; gap: 12px;
+      padding: 10px 16px; border-bottom: 1px solid var(--border);
+      cursor: pointer; transition: background 0.1s; position: relative;
+    }
+    .contact-row:active { background: var(--bg-secondary); }
+
+    /* ── Avatar ───────────────────────────────────────────────────────────── */
+    .avatar {
+      width: 44px; height: 44px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 15px; font-weight: 600; flex-shrink: 0;
+    }
+    .av-teal   { background: #E1F5EE; color: #085041; }
+    .av-blue   { background: #E6F1FB; color: #0C447C; }
+    .av-amber  { background: #FAEEDA; color: #633806; }
+    .av-coral  { background: #FAECE7; color: #712B13; }
+    .av-purple { background: #EEEDFE; color: #3C3489; }
+    .av-green  { background: #EAF3DE; color: #27500A; }
+
+    .contact-info { flex: 1; min-width: 0; }
+    .contact-name {
+      font-size: 15px; font-weight: 500; color: var(--text-primary);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .contact-name .descriptor { font-weight: 400; color: var(--text-secondary); }
+    .contact-preview { font-size: 12px; color: var(--text-tertiary); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .contact-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
+    .contact-time { font-size: 11px; color: var(--text-tertiary); white-space: nowrap; }
+    .reminder-dot { width: 8px; height: 8px; border-radius: 50%; background: #BA7517; }
+
+    /* ── FAB ──────────────────────────────────────────────────────────────── */
+    .fab {
+      position: absolute;
+      bottom: calc(var(--safe-bottom) + 20px);
+      right: 20px;
+      width: 52px; height: 52px; border-radius: 50%;
+      background: var(--tl-accent); color: white;
+      border: none; cursor: pointer; font-size: 24px;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 4px 16px rgba(29,158,117,0.35);
+      transition: transform 0.15s, background 0.15s;
+      z-index: 10;
+    }
+    .fab:active { transform: scale(0.94); background: var(--tl-accent-dark); }
+
+    /* ── Timeline View ────────────────────────────────────────────────────── */
+    .contact-header {
+      display: flex; align-items: center; gap: 10px;
+      padding: calc(var(--safe-top) + 10px) 16px 10px;
+      border-bottom: 1px solid var(--border); flex-shrink: 0;
+      background: var(--bg);
+    }
+    .header-info { flex: 1; min-width: 0; }
+    .header-name { font-size: 16px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .header-sub { font-size: 12px; color: var(--text-tertiary); margin-top: 1px; }
+
+    .filter-scroll {
+      display: flex; gap: 6px; padding: 10px 16px;
+      overflow-x: auto; border-bottom: 1px solid var(--border);
+      scrollbar-width: none; flex-shrink: 0;
+    }
+    .filter-scroll::-webkit-scrollbar { display: none; }
+    .chip {
+      display: flex; align-items: center; gap: 4px;
+      padding: 5px 11px; border-radius: var(--radius-xl); white-space: nowrap;
+      font-size: 12px; font-weight: 500; cursor: pointer;
+      border: 1px solid var(--border);
+      background: var(--bg); color: var(--text-secondary);
+      transition: all 0.1s; user-select: none;
+    }
+    .chip i { font-size: 13px; }
+    .chip.active-all    { background: var(--tl-accent-light); color: var(--tl-accent-text); border-color: var(--tl-accent); }
+    .chip.active-call   { background: var(--c-call);  color: var(--c-call-fg);  border-color: #5DCAA5; }
+    .chip.active-sms    { background: var(--c-sms);   color: var(--c-sms-fg);   border-color: #85B7EB; }
+    .chip.active-email  { background: var(--c-email); color: var(--c-email-fg); border-color: #EF9F27; }
+    .chip.active-meet   { background: var(--c-meet);  color: var(--c-meet-fg);  border-color: #AFA9EC; }
+    .chip.active-wa     { background: var(--c-wa);    color: var(--c-wa-fg);    border-color: #97C459; }
+    .chip.active-doc    { background: var(--c-doc);   color: var(--c-doc-fg);   border-color: #F0997B; }
+    .chip.active-note   { background: var(--c-note);  color: var(--c-note-fg);  border-color: var(--border-strong); }
+
+    .topic-scroll {
+      display: flex; align-items: center; gap: 6px; padding: 8px 16px;
+      overflow-x: auto; border-bottom: 1px solid var(--border);
+      scrollbar-width: none; flex-shrink: 0;
+    }
+    .topic-scroll::-webkit-scrollbar { display: none; }
+    .topic-label { font-size: 11px; color: var(--text-tertiary); flex-shrink: 0; }
+    .topic-chip {
+      padding: 4px 10px; border-radius: var(--radius-xl);
+      font-size: 11px; font-weight: 500; cursor: pointer;
+      border: 1px solid var(--border); background: var(--bg);
+      color: var(--text-secondary); white-space: nowrap;
+      transition: all 0.1s; user-select: none;
+    }
+    .topic-chip.active { background: #EEEDFE; color: #3C3489; border-color: #AFA9EC; }
+
+    /* ── Timeline ─────────────────────────────────────────────────────────── */
+    .timeline { flex: 1; overflow-y: auto; padding: 12px 16px 80px; -webkit-overflow-scrolling: touch; }
+    .tl-date {
+      font-size: 11px; font-weight: 600; color: var(--text-tertiary);
+      letter-spacing: 0.05em; padding: 8px 0 6px;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .tl-date::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+    .tl-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 12px 14px; margin-bottom: 10px;
+      cursor: pointer; transition: border-color 0.15s;
+      position: relative; overflow: hidden;
+    }
+    .tl-card::before {
+      content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+    }
+    .tl-card[data-type="call"]::before  { background: var(--c-call-fg); }
+    .tl-card[data-type="sms"]::before   { background: var(--c-sms-fg); }
+    .tl-card[data-type="email"]::before { background: var(--c-email-fg); }
+    .tl-card[data-type="meet"]::before  { background: var(--c-meet-fg); }
+    .tl-card[data-type="wa"]::before    { background: var(--c-wa-fg); }
+    .tl-card[data-type="doc"]::before   { background: var(--c-doc-fg); }
+    .tl-card[data-type="note"]::before  { background: var(--c-note-fg); }
+    .tl-card:active { border-color: var(--border-strong); }
+
+    .card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
+    .type-badge {
+      width: 26px; height: 26px; border-radius: 7px;
+      display: flex; align-items: center; justify-content: center; font-size: 13px; flex-shrink: 0;
+    }
+    .tb-call  { background: var(--c-call);  color: var(--c-call-fg); }
+    .tb-sms   { background: var(--c-sms);   color: var(--c-sms-fg); }
+    .tb-email { background: var(--c-email); color: var(--c-email-fg); }
+    .tb-meet  { background: var(--c-meet);  color: var(--c-meet-fg); }
+    .tb-wa    { background: var(--c-wa);    color: var(--c-wa-fg); }
+    .tb-doc   { background: var(--c-doc);   color: var(--c-doc-fg); }
+    .tb-note  { background: var(--c-note);  color: var(--c-note-fg); }
+
+    .card-type-name { font-size: 12px; color: var(--text-secondary); }
+    .card-time { font-size: 11px; color: var(--text-tertiary); margin-left: auto; }
+    .auto-badge { font-size: 9px; font-weight: 600; padding: 1px 5px; border-radius: 10px; background: var(--tl-accent-light); color: var(--tl-accent-text); letter-spacing: 0.03em; }
+    .card-body { font-size: 13px; color: var(--text-primary); line-height: 1.55; }
+    .card-body strong { font-weight: 500; }
+    .card-footer { display: flex; gap: 4px; margin-top: 8px; flex-wrap: wrap; align-items: center; }
+    .topic-tag { font-size: 10px; font-weight: 500; padding: 2px 7px; border-radius: var(--radius-xl); background: #EEEDFE; color: #3C3489; }
+    .reminder-tag { font-size: 10px; font-weight: 500; padding: 2px 7px; border-radius: var(--radius-xl); background: #FAEEDA; color: #633806; display: flex; align-items: center; gap: 3px; }
+
+    .tl-empty { text-align: center; padding: 40px 20px; color: var(--text-tertiary); font-size: 14px; line-height: 1.6; }
+    .tl-empty i { font-size: 36px; display: block; margin-bottom: 12px; opacity: 0.4; }
+
+    /* ── Quick-add bar ────────────────────────────────────────────────────── */
+    .quick-add {
+      display: flex; gap: 6px; padding: 10px 16px;
+      padding-bottom: calc(var(--safe-bottom) + 10px);
+      border-top: 1px solid var(--border);
+      background: var(--bg); flex-shrink: 0;
+    }
+    .qa-btn {
+      flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
+      padding: 7px 4px; background: var(--bg-secondary); border: none;
+      border-radius: var(--radius-md); cursor: pointer;
+      color: var(--text-secondary); font-size: 10px; font-weight: 500;
+      font-family: var(--font); transition: background 0.1s;
+    }
+    .qa-btn i { font-size: 18px; }
+    .qa-btn:active { background: var(--bg-tertiary); }
+
+    /* ── Bottom sheet / Modal ─────────────────────────────────────────────── */
+    .sheet-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.4);
+      z-index: 50; display: none; align-items: flex-end;
+      animation: fadeIn 0.2s;
+    }
+    .sheet-overlay.open { display: flex; }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+    .sheet {
+      background: var(--bg); width: 100%; max-width: 480px; margin: 0 auto;
+      border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+      max-height: 90vh; overflow-y: auto;
+      animation: slideUp 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+      padding-bottom: var(--safe-bottom);
+    }
+    @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+
+    .sheet-handle {
+      width: 36px; height: 4px; border-radius: 2px;
+      background: var(--border-strong); margin: 10px auto 0;
+    }
+    .sheet-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 16px 12px; border-bottom: 1px solid var(--border);
+    }
+    .sheet-title { font-size: 16px; font-weight: 600; color: var(--text-primary); }
+
+    /* ── Install banner ───────────────────────────────────────────────────── */
+    #install-banner {
+      display: none;
+      margin: 12px 16px; padding: 12px 14px;
+      background: var(--tl-accent-light); border-radius: var(--radius-lg);
+      border: 1px solid var(--tl-accent); flex-shrink: 0;
+      align-items: center; gap: 10px;
+    }
+    #install-banner.show { display: flex; }
+    #install-banner i { font-size: 20px; color: var(--tl-accent-text); }
+    #install-banner p { flex: 1; font-size: 13px; color: var(--tl-accent-text); }
+    #install-banner button { font-size: 13px; font-weight: 600; color: var(--tl-accent-text); background: none; border: 1px solid var(--tl-accent); border-radius: var(--radius-md); padding: 5px 10px; cursor: pointer; font-family: var(--font); }
+
+    /* ── Toast ────────────────────────────────────────────────────────────── */
+    #toast {
+      position: fixed; bottom: calc(var(--safe-bottom) + 80px); left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: var(--text-primary); color: white;
+      padding: 10px 18px; border-radius: var(--radius-xl);
+      font-size: 13px; font-weight: 500; white-space: nowrap;
+      opacity: 0; transition: all 0.25s; pointer-events: none; z-index: 200;
+    }
+    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    /* ── Call overlay ─────────────────────────────────────────────────────── */
+    #call-overlay {
+      position: fixed; inset: 0; z-index: 300;
+      background: rgba(0,0,0,0.6);
+      display: none; align-items: flex-end; justify-content: center;
+      padding: 0 0 var(--safe-bottom);
+    }
+    #call-overlay.show { display: flex; }
+    .call-reminder-card {
+      background: var(--bg); width: 100%; max-width: 480px;
+      border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+      padding: 16px 16px 20px;
+    }
+    .call-rem-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+    .call-rem-header i { font-size: 18px; color: #BA7517; }
+    .call-rem-title { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+    .call-rem-count { font-size: 12px; color: var(--text-tertiary); margin-left: auto; }
+    .call-rem-item { background: var(--bg-secondary); border-radius: var(--radius-md); padding: 10px 12px; margin-bottom: 8px; }
+    .call-rem-item-title { font-size: 13px; font-weight: 500; color: var(--text-primary); }
+    .call-rem-item-meta { font-size: 11px; color: var(--text-tertiary); margin-top: 2px; }
+    .call-rem-dismiss { font-size: 13px; color: var(--text-tertiary); text-align: center; margin-top: 10px; cursor: pointer; }
+
+    /* ── Scrollbar ────────────────────────────────────────────────────────── */
+    ::-webkit-scrollbar { width: 4px; height: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 2px; }
+
+    /* ── Reduced motion ───────────────────────────────────────────────────── */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+    }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <!-- Loading Screen -->
+  <div id="loading-screen">
+    <div class="loading-logo"><i class="ti ti-timeline"></i></div>
+    <div class="loading-name">ThreadLog</div>
+    <div class="loading-spinner"></div>
+  </div>
+
+  <!-- Install Banner (shown when PWA can be installed) -->
+  <div id="install-banner">
+    <i class="ti ti-download"></i>
+    <p>Install ThreadLog on your home screen</p>
+    <button id="install-btn">Install</button>
+    <button onclick="this.parentElement.classList.remove('show')" style="background:none;border:none;cursor:pointer;color:var(--text-tertiary);font-size:18px;padding:2px"><i class="ti ti-x"></i></button>
+  </div>
+
+  <!-- ── View: Contact List ──────────────────────────────────────────────── -->
+  <div class="view active" id="view-contacts">
+    <div class="topbar">
+      <span class="topbar-title">ThreadLog</span>
+      <button class="icon-btn" id="btn-reminders-global" title="Reminders"><i class="ti ti-bell"></i></button>
+      <button class="icon-btn" id="btn-settings" title="Settings"><i class="ti ti-settings"></i></button>
+    </div>
+    <div class="search-wrap">
+      <div class="search-inner">
+        <i class="ti ti-search"></i>
+        <input type="text" id="contact-search" placeholder="Search contacts…" autocomplete="off" />
+        <button class="search-clear" id="search-clear"><i class="ti ti-x"></i></button>
+      </div>
+    </div>
+    <div class="contact-list" id="contact-list">
+      <!-- Populated by JS -->
+    </div>
+    <button class="fab" id="fab-add-contact" title="Add contact">
+      <i class="ti ti-plus"></i>
+    </button>
+  </div>
+
+  <!-- ── View: Contact Timeline ──────────────────────────────────────────── -->
+  <div class="view" id="view-timeline">
+    <div class="contact-header">
+      <button class="icon-btn back-btn" id="btn-back-timeline"><i class="ti ti-arrow-left"></i></button>
+      <div class="avatar" id="tl-avatar"></div>
+      <div class="header-info">
+        <div class="header-name" id="tl-name"></div>
+        <div class="header-sub" id="tl-sub"></div>
+      </div>
+      <button class="icon-btn" id="btn-add-reminder" title="Add reminder"><i class="ti ti-bell"></i></button>
+      <button class="icon-btn" id="btn-contact-menu" title="Options"><i class="ti ti-dots-vertical"></i></button>
+    </div>
+    <div class="filter-scroll" id="type-filters">
+      <div class="chip active-all" data-filter="all"><i class="ti ti-layout-list"></i> All</div>
+      <div class="chip" data-filter="call"><i class="ti ti-phone"></i> Calls</div>
+      <div class="chip" data-filter="sms"><i class="ti ti-message"></i> SMS</div>
+      <div class="chip" data-filter="email"><i class="ti ti-mail"></i> Email</div>
+      <div class="chip" data-filter="meet"><i class="ti ti-video"></i> Meetings</div>
+      <div class="chip" data-filter="wa"><i class="ti ti-brand-whatsapp"></i> WhatsApp</div>
+      <div class="chip" data-filter="doc"><i class="ti ti-file"></i> Docs</div>
+      <div class="chip" data-filter="note"><i class="ti ti-notes"></i> Notes</div>
+    </div>
+    <div class="topic-scroll" id="topic-filters">
+      <span class="topic-label">Topics</span>
+      <!-- Populated by JS -->
+    </div>
+    <div class="timeline" id="timeline">
+      <!-- Populated by JS -->
+    </div>
+    <div class="quick-add">
+      <button class="qa-btn" data-entry-type="call"><i class="ti ti-phone"></i>Call</button>
+      <button class="qa-btn" data-entry-type="sms"><i class="ti ti-message"></i>SMS</button>
+      <button class="qa-btn" data-entry-type="meet"><i class="ti ti-video"></i>Meet</button>
+      <button class="qa-btn" data-entry-type="wa"><i class="ti ti-brand-whatsapp"></i>WhatsApp</button>
+      <button class="qa-btn" data-entry-type="doc"><i class="ti ti-file"></i>Doc</button>
+      <button class="qa-btn" data-entry-type="note"><i class="ti ti-notes"></i>Note</button>
+    </div>
+  </div>
+
+  <!-- ── Sheets (loaded from js/sheets.js) ──────────────────────────────── -->
+  <div class="sheet-overlay" id="sheet-overlay">
+    <div class="sheet" id="sheet-content">
+      <div class="sheet-handle"></div>
+      <!-- Content injected by JS -->
+    </div>
+  </div>
+
+  <!-- ── Call Reminder Overlay ───────────────────────────────────────────── -->
+  <div id="call-overlay">
+    <div class="call-reminder-card">
+      <div class="call-rem-header">
+        <i class="ti ti-bell"></i>
+        <span class="call-rem-title" id="call-rem-title">Reminders</span>
+        <span class="call-rem-count" id="call-rem-count"></span>
+      </div>
+      <div id="call-rem-list"></div>
+      <div class="call-rem-dismiss" id="call-rem-dismiss">Dismiss</div>
+    </div>
+  </div>
+
+  <!-- ── Toast ──────────────────────────────────────────────────────────── -->
+  <div id="toast"></div>
+
+</div>
+
+<!-- ── Scripts ──────────────────────────────────────────────────────────── -->
+<script src="js/db.js"></script>
+<script src="js/contacts.js"></script>
+<script src="js/timeline.js"></script>
+<script src="js/reminders.js"></script>
+<script src="js/sync.js"></script>
+<script src="js/sheets.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

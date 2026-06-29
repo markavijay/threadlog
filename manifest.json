@@ -1,0 +1,28 @@
+{
+  "name": "ThreadLog",
+  "short_name": "ThreadLog",
+  "description": "Contact-centric activity timeline. Every call, email, meeting and message with every contact — in one scroll.",
+  "start_url": "/index.html",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#ffffff",
+  "theme_color": "#1D9E75",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["productivity", "business"],
+  "lang": "en",
+  "dir": "ltr",
+  "scope": "/"
+}

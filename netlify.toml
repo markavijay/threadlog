@@ -1,0 +1,9 @@
+[build]
+  publish = "."
+
+[build.processing]
+  skip_processing = true
+
+[build.processing.js]
+  bundle = false
+  minify = false
