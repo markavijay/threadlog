@@ -732,6 +732,26 @@ const TL_SHEETS = (() => {
             </button>
           </div>`}
 
+        <div class="form-section-label">Storage location</div>
+        ${!TL_DB.isFileSystemSupported() ? `
+          <div style="padding:12px 0;border-bottom:1px solid var(--border)">
+            <p style="font-size:13px;color:var(--text-secondary);line-height:1.6">Your browser doesn't support folder storage. Data is kept in this browser only. Use Chrome or Edge to enable Resilio-synced storage.</p>
+          </div>` : TL_DB.isUsingFileSystem() ? `
+          <div style="display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid var(--border)">
+            <i class="ti ti-folder-check" style="font-size:20px;color:var(--tl-accent)"></i>
+            <div style="flex:1">
+              <div style="font-size:14px;font-weight:500;color:var(--text-primary)">Connected to folder</div>
+              <div style="font-size:12px;color:var(--text-tertiary)">${TL_APP._esc(TL_DB.getConnectedFolderName() || '')}</div>
+            </div>
+            <button onclick="TL_DB.connectFolder().then(()=>{TL_APP.toast('Folder reconnected'); TL_SHEETS.openSettings()}).catch(e=>TL_APP.toast(e.message))" style="font-size:12px;color:var(--tl-accent);background:none;border:none;cursor:pointer;font-family:var(--font)">Change</button>
+          </div>` : `
+          <div style="padding:12px 0;border-bottom:1px solid var(--border)">
+            <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px;line-height:1.6">Connect your Resilio-synced ThreadLog folder so your data lives in a real file and syncs across devices.</p>
+            <button onclick="TL_DB.connectFolder().then(()=>{TL_APP.toast('Folder connected ✓'); TL_SHEETS.openSettings()}).catch(e=>TL_APP.toast(e.message))" style="display:flex;align-items:center;justify-content:center;gap:10px;width:100%;padding:11px;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--bg);font-size:14px;font-weight:500;color:var(--text-primary);font-family:var(--font);cursor:pointer">
+              <i class="ti ti-folder-plus" style="font-size:18px"></i> Choose ThreadLog folder
+            </button>
+          </div>`}
+
         <div class="form-section-label">Sync settings</div>
         <div style="padding:10px 0;border-bottom:1px solid var(--border)">
           <div style="font-size:14px;color:var(--text-primary);margin-bottom:6px">Sync emails from</div>

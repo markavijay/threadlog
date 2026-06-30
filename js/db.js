@@ -11,9 +11,13 @@
 
 var TL_DB = (function() {
 
-  let _db = null;       // sql.js Database instance
-  let _SQL = null;      // sql.js module
-  let _dirty = false;   // track unsaved changes
+  let _db = null;            // sql.js Database instance
+  let _SQL = null;           // sql.js module
+  let _dirty = false;        // track unsaved changes
+  let _dirHandle = null;     // FileSystemDirectoryHandle for the ThreadLog data folder
+  let _fileHandle = null;    // FileSystemFileHandle for threadlog.db inside that folder
+  let _fsSupported = 'showDirectoryPicker' in window;
+  let _usingFileSystem = false; // true once we have a working folder connection
 
   // ─── Schema ────────────────────────────────────────────────────────────────
 
@@ -118,10 +122,19 @@ var TL_DB = (function() {
       locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/${file}`
     });
 
-    const saved = await _loadFromStorage();
+    // Try to reconnect to a previously-chosen folder (desktop Chrome remembers permission)
+    let saved = null;
+    if (_fsSupported) {
+      saved = await _tryReconnectFolder();
+    }
+    // Fall back to IndexedDB if no folder connected yet
+    if (saved === null && !_usingFileSystem) {
+      saved = await _loadFromIDB();
+    }
+
     if (saved) {
       _db = new _SQL.Database(saved);
-      console.log('[DB] Loaded existing database');
+      console.log('[DB] Loaded existing database', _usingFileSystem ? '(folder)' : '(IndexedDB)');
     } else {
       _db = new _SQL.Database();
       console.log('[DB] Created new database');
@@ -142,9 +155,111 @@ var TL_DB = (function() {
     return true;
   }
 
+  // ─── Folder connection (File System Access API) ─────────────────────────────
+
+  // Call this from a user gesture (button click) to let the user pick/create
+  // the Resilio-synced ThreadLog data folder.
+  async function connectFolder() {
+    if (!_fsSupported) {
+      throw new Error('Your browser does not support folder access. Use Chrome or Edge.');
+    }
+    const dir = await window.showDirectoryPicker({ mode: 'readwrite' });
+    await _idbSetHandle('threadlog_dir_handle', dir);
+    _dirHandle = dir;
+    _fileHandle = await _getOrCreateDbFile(dir);
+    _usingFileSystem = true;
+
+    // If we already have an in-memory DB (e.g. user connected folder after first run),
+    // merge: prefer existing file in folder if present and non-empty, else write current db there.
+    const existing = await _readFileHandle(_fileHandle);
+    if (existing && existing.byteLength > 0) {
+      _db = new _SQL.Database(existing);
+      _db.run(SCHEMA); // ensure schema is current
+    } else {
+      await _persist();
+    }
+    return true;
+  }
+
+  function isUsingFileSystem() { return _usingFileSystem; }
+  function isFileSystemSupported() { return _fsSupported; }
+  function getConnectedFolderName() { return _dirHandle ? _dirHandle.name : null; }
+
+  async function hadPreviousFolder() {
+    try {
+      const dir = await _idbGetHandle('threadlog_dir_handle');
+      return !!dir;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  async function _tryReconnectFolder() {
+    try {
+      const dir = await _idbGetHandle('threadlog_dir_handle');
+      if (!dir) return null;
+      // Check/request permission silently first, prompt only if needed
+      const perm = await dir.queryPermission({ mode: 'readwrite' });
+      if (perm !== 'granted') {
+        // Can't prompt without a user gesture on boot — mark for reconnect banner
+        return null;
+      }
+      _dirHandle = dir;
+      _fileHandle = await _getOrCreateDbFile(dir);
+      _usingFileSystem = true;
+      return await _readFileHandle(_fileHandle);
+    } catch (e) {
+      console.warn('[DB] Could not auto-reconnect to folder:', e);
+      return null;
+    }
+  }
+
+  // Call this from a button tap if init() couldn't silently reconnect
+  // (e.g. permission needs a fresh user gesture, common after browser restart)
+  async function reconnectFolderWithPrompt() {
+    try {
+      const dir = await _idbGetHandle('threadlog_dir_handle');
+      if (!dir) return false;
+      const perm = await dir.requestPermission({ mode: 'readwrite' });
+      if (perm !== 'granted') return false;
+      _dirHandle = dir;
+      _fileHandle = await _getOrCreateDbFile(dir);
+      _usingFileSystem = true;
+      const data = await _readFileHandle(_fileHandle);
+      if (data && data.byteLength > 0) {
+        _db = new _SQL.Database(data);
+        _db.run(SCHEMA);
+      }
+      return true;
+    } catch (e) {
+      console.warn('[DB] Reconnect with prompt failed:', e);
+      return false;
+    }
+  }
+
+  async function _getOrCreateDbFile(dirHandle) {
+    return await dirHandle.getFileHandle('threadlog.db', { create: true });
+  }
+
+  async function _readFileHandle(fileHandle) {
+    try {
+      const file = await fileHandle.getFile();
+      const buf = await file.arrayBuffer();
+      return new Uint8Array(buf);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async function _writeFileHandle(fileHandle, data) {
+    const writable = await fileHandle.createWritable();
+    await writable.write(data);
+    await writable.close();
+  }
+
   // ─── Storage ───────────────────────────────────────────────────────────────
 
-  async function _loadFromStorage() {
+  async function _loadFromIDB() {
     try {
       const idb = await _idbGet('threadlog_db');
       if (idb) return new Uint8Array(idb);
@@ -157,15 +272,30 @@ var TL_DB = (function() {
   async function _persist() {
     try {
       const data = _db.export();
-      await _idbSet('threadlog_db', data.buffer);
+      if (_usingFileSystem && _fileHandle) {
+        await _writeFileHandle(_fileHandle, data);
+        console.log('[DB] Saved to folder:', _dirHandle?.name);
+      } else {
+        await _idbSet('threadlog_db', data.buffer);
+        console.log('[DB] Persisted to IndexedDB');
+      }
       _dirty = false;
-      console.log('[DB] Persisted to IndexedDB');
     } catch (e) {
       console.error('[DB] Persist failed:', e);
+      // If folder write failed (e.g. permission revoked), fall back to IDB so data isn't lost
+      if (_usingFileSystem) {
+        try {
+          await _idbSet('threadlog_db', _db.export().buffer);
+          console.warn('[DB] Folder write failed — saved to IndexedDB as fallback');
+        } catch (e2) { /* give up silently */ }
+      }
     }
   }
 
   function _persistSync() {
+    // Synchronous best-effort save on page unload.
+    // File System Access writes are async-only, so on unload we always fall back to IDB
+    // (the next successful periodic/explicit save will catch up the folder copy).
     try {
       const data = _db.export();
       const req = indexedDB.open('ThreadLogStorage', 1);
@@ -179,8 +309,12 @@ var TL_DB = (function() {
 
   function _idbGet(key) {
     return new Promise((resolve, reject) => {
-      const req = indexedDB.open('ThreadLogStorage', 1);
-      req.onupgradeneeded = e => e.target.result.createObjectStore('kv');
+      const req = indexedDB.open('ThreadLogStorage', 2);
+      req.onupgradeneeded = e => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
+        if (!db.objectStoreNames.contains('handles')) db.createObjectStore('handles');
+      };
       req.onsuccess = e => {
         const tx = e.target.result.transaction('kv', 'readonly');
         const r = tx.objectStore('kv').get(key);
@@ -193,11 +327,53 @@ var TL_DB = (function() {
 
   function _idbSet(key, value) {
     return new Promise((resolve, reject) => {
-      const req = indexedDB.open('ThreadLogStorage', 1);
-      req.onupgradeneeded = e => e.target.result.createObjectStore('kv');
+      const req = indexedDB.open('ThreadLogStorage', 2);
+      req.onupgradeneeded = e => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
+        if (!db.objectStoreNames.contains('handles')) db.createObjectStore('handles');
+      };
       req.onsuccess = e => {
         const tx = e.target.result.transaction('kv', 'readwrite');
         const r = tx.objectStore('kv').put(value, key);
+        r.onsuccess = () => resolve();
+        r.onerror = () => reject(r.error);
+      };
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  function _idbGetHandle(key) {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open('ThreadLogStorage', 2);
+      req.onupgradeneeded = e => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
+        if (!db.objectStoreNames.contains('handles')) db.createObjectStore('handles');
+      };
+      req.onsuccess = e => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains('handles')) { resolve(null); return; }
+        const tx = db.transaction('handles', 'readonly');
+        const r = tx.objectStore('handles').get(key);
+        r.onsuccess = () => resolve(r.result || null);
+        r.onerror = () => reject(r.error);
+      };
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  function _idbSetHandle(key, handle) {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open('ThreadLogStorage', 2);
+      req.onupgradeneeded = e => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
+        if (!db.objectStoreNames.contains('handles')) db.createObjectStore('handles');
+      };
+      req.onsuccess = e => {
+        const tx = e.target.result.transaction('handles', 'readwrite');
+        const r = tx.objectStore('handles').put(handle, key);
         r.onsuccess = () => resolve();
         r.onerror = () => reject(r.error);
       };
@@ -584,6 +760,9 @@ var TL_DB = (function() {
 
   return {
     init,
+    // Folder connection (File System Access API)
+    connectFolder, reconnectFolderWithPrompt,
+    isUsingFileSystem, isFileSystemSupported, getConnectedFolderName, hadPreviousFolder,
     // Contacts
     getContacts, getContact, createContact, updateContact, deleteContact,
     searchContacts, getContactPhones, getContactEmails,

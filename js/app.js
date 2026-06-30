@@ -31,6 +31,7 @@ const TL_APP = (() => {
       TL_REMINDERS.startPolling();
       TL_SYNC.startAutoSync();
       _hideLoader();
+      _checkFolderReconnect();
     } catch (err) {
       console.error('[App] Boot failed:', err);
       document.getElementById('loading-screen').innerHTML = `
@@ -81,6 +82,16 @@ const TL_APP = (() => {
     const el = document.getElementById('loading-screen');
     el.classList.add('hidden');
     setTimeout(() => el.style.display = 'none', 400);
+  }
+
+  function _checkFolderReconnect() {
+    // If file system is supported but we're not connected to a folder yet,
+    // check if one was chosen before — if so, the permission likely just
+    // needs a fresh user gesture (common after browser restart).
+    if (!TL_DB.isFileSystemSupported() || TL_DB.isUsingFileSystem()) return;
+    TL_DB.hadPreviousFolder().then(had => {
+      if (had) setTimeout(() => toast('Tap Settings to reconnect your ThreadLog folder'), 1500);
+    });
   }
 
   // ── Service Worker ────────────────────────────────────────────────────────
