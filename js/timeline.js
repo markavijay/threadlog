@@ -73,8 +73,22 @@ const TL_TIMELINE = (() => {
 
     tl.innerHTML = html;
 
-    // Wire card clicks
+    // Wire card clicks (and Gmail "Open in Gmail" links within cards)
     tl.addEventListener('click', e => {
+      const link = e.target.closest('.gmail-open-link');
+      if (link) {
+        e.preventDefault();
+        const fallbackUrl = link.dataset.gmailFallback;
+        let appOpened = false;
+        const blurHandler = () => { appOpened = true; };
+        window.addEventListener('blur', blurHandler, { once: true });
+        window.location.href = link.getAttribute('href');
+        setTimeout(() => {
+          window.removeEventListener('blur', blurHandler);
+          if (!appOpened) window.open(fallbackUrl, '_blank', 'noopener');
+        }, 800);
+        return;
+      }
       const card = e.target.closest('.tl-card');
       if (!card) return;
       const entryId = parseInt(card.dataset.entryId);
@@ -137,7 +151,7 @@ const TL_TIMELINE = (() => {
       if (e.body) body += (body ? '<br>' : '') + TL_APP._esc(e.body);
       if (e.source_id && e.source_id.startsWith('gmail-')) {
         const msgId = e.source_id.replace('gmail-', '');
-        body += `<br><a href="https://mail.google.com/mail/u/0/#all/${msgId}" target="_blank" rel="noopener" style="font-size:12px;color:var(--tl-accent);text-decoration:none" onclick="event.stopPropagation()"><i class="ti ti-external-link"></i> Open in Gmail</a>`;
+        body += `<br><a href="googlegmail://co?id=${msgId}" data-gmail-fallback="https://mail.google.com/mail/u/0/#all/${msgId}" class="gmail-open-link" rel="noopener" style="font-size:12px;color:var(--tl-accent);text-decoration:none" onclick="event.stopPropagation()"><i class="ti ti-external-link"></i> Open in Gmail</a>`;
       }
     } else if (e.type === 'meet') {
       const dur = e.duration_s ? ` · ${_formatDuration(e.duration_s)}` : '';
