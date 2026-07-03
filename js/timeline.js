@@ -95,7 +95,7 @@ const TL_TIMELINE = (() => {
     groups.forEach(group => {
       html += `<div class="tl-date">${group.label}</div>`;
       group.entries.forEach(e => {
-        html += _entryCardHTML(e);
+        html += _entryCardHTML(e, q);
       });
     });
 
@@ -145,7 +145,21 @@ const TL_TIMELINE = (() => {
     return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
   }
 
-  function _entryCardHTML(e) {
+  // Wraps matches of `query` in <mark>, but only within text content — segments
+  // that look like HTML tags (icons, links, style attributes, etc.) are left
+  // untouched so highlighting can never corrupt markup or match inside an
+  // attribute. Safe to run on the fully-assembled body HTML for any entry type.
+  function _highlightHTML(html, query) {
+    if (!query || !query.trim()) return html;
+    const q = query.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`(${q})`, 'ig');
+    return html.split(/(<[^>]+>)/g).map(segment => {
+      if (segment.startsWith('<')) return segment; // tag — leave untouched
+      return segment.replace(re, '<mark style="background:#FFE58A;color:inherit;padding:0 1px;border-radius:2px">$1</mark>');
+    }).join('');
+  }
+
+  function _entryCardHTML(e, query = '') {
     const meta = TYPE_META[e.type] || TYPE_META.note;
     const time = new Date(e.timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
 
@@ -193,6 +207,8 @@ const TL_TIMELINE = (() => {
     } else {
       body = TL_APP._esc(e.body || '');
     }
+
+    body = _highlightHTML(body, query);
 
     // Topics
     const topicTags = (e.topics || []).map(t =>

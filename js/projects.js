@@ -260,7 +260,7 @@ const TL_PROJECTS = (() => {
     let html = '';
     groups.forEach(group => {
       html += `<div class="tl-date">${group.label}</div>`;
-      group.entries.forEach(e => { html += TL_TIMELINE.entryCardHTML(e); });
+      group.entries.forEach(e => { html += TL_TIMELINE.entryCardHTML(e, _activeSearchQuery); });
     });
     tl.innerHTML = html;
   }
