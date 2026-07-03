@@ -355,7 +355,7 @@ const TL_SYNC = (() => {
 
     const params = new URLSearchParams({
       client_id: GOOGLE_CLIENT_ID,
-      redirect_uri: window.location.origin + '/app/index.html',
+      redirect_uri: window.location.origin + '/index.html',
       response_type: 'token',
       scope: GOOGLE_SCOPES,
       include_granted_scopes: 'true',
@@ -427,6 +427,7 @@ const TL_SYNC = (() => {
     }
 
     let totalImported = 0;
+    let authFailed = false;
 
     for (const { email, contact } of emails) {
       try {
@@ -434,24 +435,30 @@ const TL_SYNC = (() => {
         totalImported += imported;
       } catch (e) {
         console.error(`[Sync] Gmail error for ${email}:`, e);
+        if (String(e.message).includes('401') || String(e.message).includes('403')) authFailed = true;
       }
     }
 
     TL_DB.setSetting('last_gmail_sync', Date.now().toString());
-    if (totalImported > 0) {
+    if (authFailed) {
+      // Google access tokens from this flow expire ~1hr — surface it instead of failing silently.
+      TL_DB.setSetting('google_connected', 'false');
+      TL_APP.toast('Google session expired — reconnect in Settings');
+    } else if (totalImported > 0) {
       TL_APP.toast(`${totalImported} emails imported`);
     }
   }
 
   async function _fetchGmailThreads(email, contact) {
-    const query = encodeURIComponent(`from:${email} OR to:${email}`);
+    let q = `from:${email} OR to:${email}`;
     const syncFromDate = TL_DB.getSetting('gmail_sync_from_date');
-    const queryStr = syncFromDate
-      ? `${query} after:${Math.floor(new Date(syncFromDate).getTime() / 1000)}`
-      : decodeURIComponent(query);
+    if (syncFromDate) {
+      q += ` after:${Math.floor(new Date(syncFromDate).getTime() / 1000)}`;
+    }
+    const params = new URLSearchParams({ q, maxResults: '50' });
 
     const res = await fetch(
-      `https://www.googleapis.com/gmail/v1/users/me/messages?q=${queryStr}&maxResults=50`,
+      `https://www.googleapis.com/gmail/v1/users/me/messages?${params}`,
       { headers: { Authorization: `Bearer ${_googleToken}` } }
     );
 
