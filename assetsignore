@@ -1,0 +1,6 @@
+.git
+.wrangler
+node_modules
+*.md
+netlify.toml
+_redirects
