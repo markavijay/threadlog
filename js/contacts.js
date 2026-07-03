@@ -12,7 +12,7 @@ const TL_CONTACTS = (() => {
   function render(query = '') {
     const list = document.getElementById('contact-list');
     const contacts = query
-      ? TL_DB.searchContacts(query)
+      ? TL_DB.searchContactsAndEntries(query)
       : TL_DB.getContacts();
 
     if (!contacts.length) {
@@ -23,7 +23,7 @@ const TL_CONTACTS = (() => {
             ${query ? 'No contacts found' : 'No contacts yet'}
           </div>
           <div style="font-size:13px;line-height:1.6">
-            ${query ? `No results for "${query}"` : 'Tap the + button to add your first contact'}
+            ${query ? `No matches for "${TL_APP._esc(query)}" — checked names and message content` : 'Tap the + button to add your first contact'}
           </div>
         </div>`;
       return;
@@ -54,34 +54,54 @@ const TL_CONTACTS = (() => {
         rest.forEach(c => { html += _contactRowHTML(c); });
       }
     } else {
-      contacts.forEach(c => { html += _contactRowHTML(c); });
+      contacts.forEach(c => { html += _contactRowHTML(c, query); });
     }
 
     list.innerHTML = html;
   }
 
-  function _contactRowHTML(c) {
+  function _contactRowHTML(c, query = '') {
     const lastActivity = c.last_activity
       ? _relTime(c.last_activity)
       : '';
-    const preview = _getPreview(c);
     const hasReminder = c.pending_reminders > 0;
+
+    // Global search (Section 9.4): if this row matched because of message content
+    // rather than the contact's name, show that matching entry as the preview
+    // instead of just their most recent activity, with the search term highlighted.
+    let previewHTML;
+    if (c.matched_entry) {
+      const label = _typeName(c.matched_entry.type);
+      const snippetSrc = (c.matched_entry.body || c.matched_entry.subject || c.matched_entry.doc_name || '').replace(/<[^>]+>/g, '');
+      const snippet = snippetSrc.slice(0, 70) + (snippetSrc.length > 70 ? '…' : '');
+      previewHTML = `<span style="color:var(--tl-accent-text);font-weight:500">${TL_APP._esc(label)}:</span> ${_highlightMatch(snippet, query)}`;
+    } else {
+      previewHTML = _highlightMatch(_getPreview(c), query);
+    }
 
     return `
       <div class="contact-row" data-contact-id="${c.id}">
         <div class="avatar av-${c.avatar_color || 'teal'}">${TL_APP._esc(c.initials)}</div>
         <div class="contact-info">
           <div class="contact-name">
-            ${TL_APP._esc(c.first_name)}${c.last_name ? ' ' + TL_APP._esc(c.last_name) : ''}
+            ${_highlightMatch(c.first_name, query)}${c.last_name ? ' ' + _highlightMatch(c.last_name, query) : ''}
             ${c.descriptor ? `<span class="descriptor"> — ${TL_APP._esc(c.descriptor)}</span>` : ''}
           </div>
-          <div class="contact-preview">${TL_APP._esc(preview)}</div>
+          <div class="contact-preview">${previewHTML}</div>
         </div>
         <div class="contact-meta">
           <span class="contact-time">${lastActivity}</span>
           ${hasReminder ? '<div class="reminder-dot" title="Pending reminders"></div>' : ''}
         </div>
       </div>`;
+  }
+
+  // Escapes text for HTML, then wraps any case-insensitive match of `query` in <mark>.
+  function _highlightMatch(text, query) {
+    const esc = TL_APP._esc(text);
+    if (!query || !query.trim()) return esc;
+    const qEsc = query.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return esc.replace(new RegExp(`(${qEsc})`, 'ig'), '<mark style="background:#FFE58A;color:inherit;padding:0 1px;border-radius:2px">$1</mark>');
   }
 
   function _getPreview(c) {

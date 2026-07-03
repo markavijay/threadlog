@@ -12,6 +12,7 @@ const TL_PROJECTS = (() => {
   let _currentProject = null;
   let _hiddenContactIds = new Set();
   let _activeTypeFilter = 'all';
+  let _activeColorFilter = 'all';
 
   // ── Project list ──────────────────────────────────────────────────────────
 
@@ -100,6 +101,7 @@ const TL_PROJECTS = (() => {
     _currentProject = project;
     _hiddenContactIds = new Set();
     _activeTypeFilter = 'all';
+    _activeColorFilter = 'all';
 
     document.getElementById('proj-name').textContent = project.name;
     document.getElementById('proj-sub').textContent =
@@ -107,6 +109,7 @@ const TL_PROJECTS = (() => {
 
     _renderContactToggles();
     _resetProjectTypeFilters();
+    _resetProjectColorFilters();
     _renderTimeline();
     TL_APP.showView('view-project-detail');
   }
@@ -165,6 +168,26 @@ const TL_PROJECTS = (() => {
     if (!activeChip) _activeTypeFilter = 'all';
   }
 
+  // ── Color (Priority) Filters ────────────────────────────────────────────
+
+  function _wireProjectColorFilters() {
+    const bar = document.getElementById('project-color-filters');
+    if (!bar) return;
+    bar.addEventListener('click', e => {
+      const chip = e.target.closest('.chip');
+      if (!chip) return;
+      _activeColorFilter = chip.dataset.color;
+      _resetProjectColorFilters();
+      _renderTimeline();
+    });
+  }
+
+  function _resetProjectColorFilters() {
+    const bar = document.getElementById('project-color-filters');
+    if (!bar) return;
+    bar.innerHTML = TL_TIMELINE.colorFilterChipsHTML(_activeColorFilter);
+  }
+
   function _renderTimeline() {
     const tl = document.getElementById('project-timeline');
     if (!tl || !_currentProject) return;
@@ -188,6 +211,7 @@ const TL_PROJECTS = (() => {
 
     const entries = TL_DB.getProjectEntries(_currentProject.id, {
       type: _activeTypeFilter === 'all' ? null : _activeTypeFilter,
+      color: _activeColorFilter === 'all' ? null : _activeColorFilter,
       excludeContactIds: [..._hiddenContactIds],
       limit: 300,
     });
@@ -293,6 +317,7 @@ const TL_PROJECTS = (() => {
     _wireNav();
     _wireContactToggles();
     _wireProjectTypeFilters();
+    _wireProjectColorFilters();
     _wireProjectTimelineClicks();
   }
 

@@ -72,6 +72,7 @@ var TL_DB = (function() {
       location    TEXT,
       auto_captured INTEGER NOT NULL DEFAULT 0,
       source_id   TEXT,
+      highlight_color TEXT,
       created_at  INTEGER NOT NULL,
       updated_at  INTEGER NOT NULL
     );
@@ -159,6 +160,7 @@ var TL_DB = (function() {
     }
 
     _db.run(SCHEMA);
+    _migrateSchema();
     _seedDefaultSettings();
     await _persist();
 
@@ -399,6 +401,14 @@ var TL_DB = (function() {
     });
   }
 
+  // Additive, backward-compatible migrations for databases created before a column
+  // existed. CREATE TABLE IF NOT EXISTS above only helps brand-new databases —
+  // existing threadlog.db files need the column added explicitly. Each ALTER is
+  // wrapped so it's a silent no-op once the column already exists.
+  function _migrateSchema() {
+    try { _db.run(`ALTER TABLE entries ADD COLUMN highlight_color TEXT`); } catch (e) { /* already exists */ }
+  }
+
   function _seedDefaultSettings() {
     const defaults = {
       'google_connected': 'false',
@@ -520,6 +530,58 @@ var TL_DB = (function() {
     return _rows(stmt).map(c => ({ ...c, display_name: _displayName(c), initials: _initials(c) }));
   }
 
+  // Global search (Section 9.4) — matches contact name/descriptor AND entry content
+  // (subject, body, doc names — covers call notes, email subjects, WhatsApp/SMS text,
+  // notes, and document names, since they all live in entries.subject/body/doc_name).
+  // Returns contact rows (same shape as getContacts) with an extra `matched_entry`
+  // when the hit came from entry content rather than the contact's own name, and
+  // `name_match` marking whether the name itself matched. Results are grouped by
+  // contact by nature of the return shape, sorted name-matches-first then by recency.
+  function searchContactsAndEntries(q) {
+    const query = (q || '').trim();
+    if (!query) return getContacts();
+    const like = `%${query}%`;
+
+    const nameStmt = _db.prepare(`
+      SELECT id FROM contacts WHERE first_name LIKE ? OR last_name LIKE ? OR descriptor LIKE ?
+    `);
+    nameStmt.bind([like, like, like]);
+    const nameMatchIds = new Set(_rows(nameStmt).map(r => r.id));
+
+    const entryStmt = _db.prepare(`
+      SELECT * FROM entries
+      WHERE subject LIKE ? OR body LIKE ? OR doc_name LIKE ?
+      ORDER BY timestamp DESC LIMIT 500
+    `);
+    entryStmt.bind([like, like, like]);
+    const matchingEntries = _rows(entryStmt);
+    const bestEntryByContact = {};
+    matchingEntries.forEach(e => {
+      if (!bestEntryByContact[e.contact_id]) bestEntryByContact[e.contact_id] = e; // most recent, since ordered DESC
+    });
+
+    const matchIds = new Set([...nameMatchIds, ...Object.keys(bestEntryByContact).map(Number)]);
+    if (!matchIds.size) return [];
+
+    const byId = new Map(getContacts().map(c => [c.id, c]));
+    const results = [...matchIds]
+      .map(id => byId.get(id))
+      .filter(Boolean)
+      .map(c => ({
+        ...c,
+        matched_entry: bestEntryByContact[c.id] || null,
+        name_match: nameMatchIds.has(c.id),
+      }));
+
+    results.sort((a, b) => {
+      if (a.name_match !== b.name_match) return a.name_match ? -1 : 1;
+      if (a.name_match) return a.first_name.localeCompare(b.first_name);
+      return (b.matched_entry?.timestamp || 0) - (a.matched_entry?.timestamp || 0);
+    });
+
+    return results;
+  }
+
   function getContactPhones(contactId) {
     const stmt = _db.prepare(`SELECT * FROM contact_phones WHERE contact_id = ?`);
     stmt.bind([contactId]);
@@ -599,13 +661,14 @@ var TL_DB = (function() {
     return _rows(stmt);
   }
 
-  function getEntries(contactId, { type = null, topicId = null, limit = 200, offset = 0 } = {}) {
+  function getEntries(contactId, { type = null, topicId = null, color = null, limit = 200, offset = 0 } = {}) {
     let sql = `
       SELECT e.* FROM entries e
       WHERE e.contact_id = ?
     `;
     const params = [contactId];
     if (type) { sql += ` AND e.type = ?`; params.push(type); }
+    if (color) { sql += ` AND e.highlight_color = ?`; params.push(color); }
     if (topicId) {
       sql += ` AND EXISTS (SELECT 1 FROM entry_topics et WHERE et.entry_id = e.id AND et.topic_id = ?)`;
       params.push(topicId);
@@ -641,7 +704,7 @@ var TL_DB = (function() {
   }
 
   function updateEntry(id, fields) {
-    const allowed = ['direction','timestamp','duration_s','subject','body','doc_name','doc_url','doc_type','location'];
+    const allowed = ['direction','timestamp','duration_s','subject','body','doc_name','doc_url','doc_type','location','highlight_color'];
     const sets = allowed.filter(f => fields[f] !== undefined).map(f => `${f} = ?`);
     const vals = allowed.filter(f => fields[f] !== undefined).map(f => fields[f]);
     if (sets.length) _run(`UPDATE entries SET ${sets.join(', ')}, updated_at = ? WHERE id = ?`, [...vals, _now(), id]);
@@ -664,6 +727,11 @@ var TL_DB = (function() {
 
   function deleteEntry(id) {
     _run(`DELETE FROM entries WHERE id = ?`, [id]);
+  }
+
+  // color: one of 'red'|'amber'|'green'|'blue'|'purple', or null to clear.
+  function setEntryHighlight(id, color) {
+    _run(`UPDATE entries SET highlight_color = ?, updated_at = ? WHERE id = ?`, [color || null, _now(), id]);
   }
 
   function entryExistsBySourceId(sourceId) {
@@ -830,7 +898,7 @@ var TL_DB = (function() {
   // Merged chronological timeline across every contact linked to a project.
   // excludeContactIds implements the per-contact toggle (Section 7.4) — toggled-off
   // contacts are simply excluded from the merged query rather than deleted from the project.
-  function getProjectEntries(projectId, { type = null, topicId = null, excludeContactIds = [], limit = 300, offset = 0 } = {}) {
+  function getProjectEntries(projectId, { type = null, topicId = null, color = null, excludeContactIds = [], limit = 300, offset = 0 } = {}) {
     let sql = `
       SELECT e.*, c.first_name AS c_first_name, c.last_name AS c_last_name,
              c.descriptor AS c_descriptor, c.avatar_color AS c_avatar_color
@@ -845,6 +913,7 @@ var TL_DB = (function() {
       params.push(...excludeContactIds);
     }
     if (type) { sql += ` AND e.type = ?`; params.push(type); }
+    if (color) { sql += ` AND e.highlight_color = ?`; params.push(color); }
     if (topicId) {
       sql += ` AND EXISTS (SELECT 1 FROM entry_topics et WHERE et.entry_id = e.id AND et.topic_id = ?)`;
       params.push(topicId);
@@ -910,13 +979,13 @@ var TL_DB = (function() {
     isUsingFileSystem, isFileSystemSupported, getConnectedFolderName, hadPreviousFolder,
     // Contacts
     getContacts, getContact, createContact, updateContact, deleteContact,
-    searchContacts, getContactPhones, getContactEmails,
+    searchContacts, searchContactsAndEntries, getContactPhones, getContactEmails,
     findContactByPhone, findContactByEmail,
     // Topics
     getContactTopics, createTopic,
     // Entries
     getEntries, getEntryTopics: _getEntryTopics, createEntry, updateEntry, deleteEntry,
-    entryExistsBySourceId,
+    entryExistsBySourceId, setEntryHighlight,
     // Reminders
     getReminders, getDueReminders, getCallReminders,
     createReminder, markReminderDone, deleteReminder,

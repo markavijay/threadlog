@@ -16,6 +16,34 @@ const TL_TIMELINE = (() => {
     note:  { icon: 'ti-notes',           badge: 'tb-note',  label: 'Note' },
   };
 
+  // Entry highlight colors — free-form flags for priority/importance, independent
+  // of entry type. Stored in entries.highlight_color; null/undefined = no flag.
+  const HIGHLIGHT_COLORS = [
+    { key: 'red',    label: 'Urgent',    hex: '#E5484D' },
+    { key: 'amber',  label: 'Important', hex: '#F5A524' },
+    { key: 'green',  label: 'Resolved',  hex: '#2F9E67' },
+    { key: 'blue',   label: 'Follow up', hex: '#3B82F6' },
+    { key: 'purple', label: 'Personal',  hex: '#8B5CF6' },
+  ];
+
+  // ── Color filter chips (reused by app.js and projects.js) ─────────────────
+
+  function colorFilterChipsHTML(active = 'all') {
+    const isAll = active === 'all';
+    const allChip = `
+      <div class="chip" data-color="all" style="${isAll ? 'background:var(--tl-accent-light);color:var(--tl-accent-text);border-color:var(--tl-accent)' : ''}">
+        <i class="ti ti-flag-2"></i> All
+      </div>`;
+    const colorChips = HIGHLIGHT_COLORS.map(h => {
+      const isActive = active === h.key;
+      return `
+        <div class="chip" data-color="${h.key}" style="${isActive ? `background:${h.hex}22;color:${h.hex};border-color:${h.hex}` : ''}">
+          <span style="width:8px;height:8px;border-radius:50%;background:${h.hex};display:inline-block;flex-shrink:0"></span> ${h.label}
+        </div>`;
+    }).join('');
+    return allChip + colorChips;
+  }
+
   // ── Topics bar ────────────────────────────────────────────────────────────
 
   function renderTopics(contact) {
@@ -45,15 +73,15 @@ const TL_TIMELINE = (() => {
 
   // ── Timeline entries ──────────────────────────────────────────────────────
 
-  function renderEntries(contactId, { type = null, topicId = null } = {}) {
+  function renderEntries(contactId, { type = null, topicId = null, color = null } = {}) {
     const tl = document.getElementById('timeline');
-    const entries = TL_DB.getEntries(contactId, { type, topicId, limit: 200 });
+    const entries = TL_DB.getEntries(contactId, { type, topicId, color, limit: 200 });
 
     if (!entries.length) {
       tl.innerHTML = `
         <div class="tl-empty">
           <i class="ti ti-timeline"></i>
-          ${type || topicId
+          ${type || topicId || color
             ? 'No entries match this filter.<br>Try a different filter or log a new entry below.'
             : 'No activity logged yet.<br>Use the quick-add bar below to log your first entry.'}
         </div>`;
@@ -182,13 +210,20 @@ const TL_TIMELINE = (() => {
       </span>
       <span style="color:var(--text-tertiary);font-size:11px">·</span>` : '';
 
+    const highlight = HIGHLIGHT_COLORS.find(h => h.key === e.highlight_color);
+    const highlightDot = highlight
+      ? `<span title="${highlight.label}" style="width:8px;height:8px;border-radius:50%;background:${highlight.hex};flex-shrink:0"></span>`
+      : '';
+    const highlightRing = highlight ? `box-shadow:0 0 0 1.5px ${highlight.hex};` : '';
+
     return `
-      <div class="tl-card" data-type="${e.type}" data-entry-id="${e.id}"${e.contact ? ` data-contact-id="${e.contact.id}"` : ''}>
+      <div class="tl-card" data-type="${e.type}" data-entry-id="${e.id}"${e.contact ? ` data-contact-id="${e.contact.id}"` : ''} style="${highlightRing}">
         <div class="card-header">
           ${contactBadge}
           <div class="type-badge ${meta.badge}"><i class="ti ${meta.icon}"></i></div>
           <span class="card-type-name">${meta.label}</span>
           ${autoBadge}
+          ${highlightDot}
           <span class="card-time">${time}</span>
         </div>
         <div class="card-body">${body || '<span style="color:var(--text-tertiary)">No notes</span>'}</div>
@@ -229,6 +264,20 @@ const TL_TIMELINE = (() => {
 
         ${_entryDetailBody(entry)}
 
+        <div style="margin-top:16px">
+          <div class="form-section-label">Priority</div>
+          <div style="display:flex;gap:10px;align-items:center;margin-top:6px">
+            <button class="hl-swatch${!entry.highlight_color ? ' hl-swatch-active' : ''}" data-color=""
+              title="None" style="width:26px;height:26px;border-radius:50%;border:1.5px dashed var(--border-strong);background:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--text-tertiary);font-size:12px;padding:0">
+              <i class="ti ti-x"></i>
+            </button>
+            ${HIGHLIGHT_COLORS.map(h => `
+              <button class="hl-swatch${entry.highlight_color === h.key ? ' hl-swatch-active' : ''}" data-color="${h.key}"
+                title="${h.label}" style="width:26px;height:26px;border-radius:50%;border:1.5px solid ${entry.highlight_color === h.key ? h.hex : 'transparent'};background:${h.hex};cursor:pointer;padding:0;box-shadow:${entry.highlight_color === h.key ? `0 0 0 2px var(--bg), 0 0 0 3.5px ${h.hex}` : 'none'}">
+              </button>`).join('')}
+          </div>
+        </div>
+
         ${(entry.topics||[]).length ? `
           <div style="margin-top:16px">
             <div class="form-section-label">Topics</div>
@@ -242,6 +291,34 @@ const TL_TIMELINE = (() => {
         </div>
       </div>`;
 
+    document.querySelectorAll('.hl-swatch').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const color = btn.dataset.color || null;
+        TL_DB.setEntryHighlight(entry.id, color);
+        entry.highlight_color = color;
+        document.querySelectorAll('.hl-swatch').forEach(b => {
+          b.classList.remove('hl-swatch-active');
+          const hex = HIGHLIGHT_COLORS.find(h => h.key === b.dataset.color)?.hex;
+          if (hex) { b.style.border = '1.5px solid transparent'; b.style.boxShadow = 'none'; }
+        });
+        btn.classList.add('hl-swatch-active');
+        const hex = HIGHLIGHT_COLORS.find(h => h.key === color)?.hex;
+        if (hex) { btn.style.border = `1.5px solid ${hex}`; btn.style.boxShadow = `0 0 0 2px var(--bg), 0 0 0 3.5px ${hex}`; }
+        // Refresh whichever timeline is currently visible behind this sheet —
+        // a merged Project view or a single contact's timeline.
+        const projectViewActive = document.getElementById('view-project-detail')?.classList.contains('active');
+        if (projectViewActive && typeof TL_PROJECTS !== 'undefined') {
+          TL_PROJECTS.refreshCurrentProject();
+        } else {
+          renderEntries(contactId, {
+            type: TL_APP.activeTypeFilter === 'all' ? null : TL_APP.activeTypeFilter,
+            topicId: TL_APP.activeTopicId,
+            color: TL_APP.activeColorFilter === 'all' ? null : TL_APP.activeColorFilter,
+          });
+        }
+      });
+    });
+
     document.getElementById('ed-close').addEventListener('click', () => TL_SHEETS.close());
     document.getElementById('ed-delete').addEventListener('click', () => {
       if (confirm('Delete this entry?')) {
@@ -250,6 +327,7 @@ const TL_TIMELINE = (() => {
         renderEntries(contactId, {
           type: TL_APP.activeTypeFilter === 'all' ? null : TL_APP.activeTypeFilter,
           topicId: TL_APP.activeTopicId,
+          color: TL_APP.activeColorFilter === 'all' ? null : TL_APP.activeColorFilter,
         });
         TL_APP.toast('Entry deleted');
       }
@@ -300,6 +378,8 @@ const TL_TIMELINE = (() => {
     entryCardHTML: _entryCardHTML,
     openEntryDetail: _openEntryDetail,
     formatDuration: _formatDuration,
+    HIGHLIGHT_COLORS,
+    colorFilterChipsHTML,
   };
 
 })();

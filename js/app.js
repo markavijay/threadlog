@@ -9,6 +9,7 @@ const TL_APP = (() => {
   let _currentContact = null;
   let _activeTypeFilter = 'all';
   let _activeTopicId = null;
+  let _activeColorFilter = 'all';
   let _deferredInstallPrompt = null;
 
   // ── Boot ──────────────────────────────────────────────────────────────────
@@ -22,6 +23,7 @@ const TL_APP = (() => {
       _wireNavigation();
       _wireContactList();
       _wireTypeFilters();
+      _wireColorFilters();
       _wireQuickAdd();
       _wireSearch();
       TL_PROJECTS.init();
@@ -157,6 +159,7 @@ const TL_APP = (() => {
     _currentContact = contact;
     _activeTypeFilter = 'all';
     _activeTopicId = null;
+    _activeColorFilter = 'all';
 
     // Header
     const av = document.getElementById('tl-avatar');
@@ -167,8 +170,9 @@ const TL_APP = (() => {
     _renderContactProjects(contactId);
 
     TL_TIMELINE.renderTopics(contact);
-    TL_TIMELINE.renderEntries(contact.id, { type: null, topicId: null });
+    TL_TIMELINE.renderEntries(contact.id, { type: null, topicId: null, color: null });
     _resetTypeFilters();
+    _resetColorFilters();
     showView('view-timeline');
   }
 
@@ -280,6 +284,7 @@ const TL_APP = (() => {
         TL_TIMELINE.renderEntries(_currentContact.id, {
           type: _activeTypeFilter === 'all' ? null : _activeTypeFilter,
           topicId: _activeTopicId,
+          color: _activeColorFilter === 'all' ? null : _activeColorFilter,
         });
       }
     });
@@ -294,6 +299,32 @@ const TL_APP = (() => {
       }
     });
     if (!activeChip) _activeTypeFilter = 'all';
+  }
+
+  // ── Color (Priority) Filters ────────────────────────────────────────────
+
+  function _wireColorFilters() {
+    const bar = document.getElementById('color-filters');
+    if (!bar) return;
+    bar.addEventListener('click', e => {
+      const chip = e.target.closest('.chip');
+      if (!chip) return;
+      _activeColorFilter = chip.dataset.color;
+      _resetColorFilters();
+      if (_currentContact) {
+        TL_TIMELINE.renderEntries(_currentContact.id, {
+          type: _activeTypeFilter === 'all' ? null : _activeTypeFilter,
+          topicId: _activeTopicId,
+          color: _activeColorFilter === 'all' ? null : _activeColorFilter,
+        });
+      }
+    });
+  }
+
+  function _resetColorFilters() {
+    const bar = document.getElementById('color-filters');
+    if (!bar) return;
+    bar.innerHTML = TL_TIMELINE.colorFilterChipsHTML(_activeColorFilter);
   }
 
   // ── Quick Add ─────────────────────────────────────────────────────────────
@@ -335,6 +366,7 @@ const TL_APP = (() => {
       TL_TIMELINE.renderEntries(_currentContact.id, {
         type: _activeTypeFilter === 'all' ? null : _activeTypeFilter,
         topicId,
+        color: _activeColorFilter === 'all' ? null : _activeColorFilter,
       });
     }
   }
@@ -400,6 +432,7 @@ const TL_APP = (() => {
     get currentContact() { return _currentContact; },
     get activeTypeFilter() { return _activeTypeFilter; },
     get activeTopicId() { return _activeTopicId; },
+    get activeColorFilter() { return _activeColorFilter; },
     refreshContactHeader,
     _esc,
     _relDate,
