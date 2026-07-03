@@ -13,6 +13,7 @@ const TL_PROJECTS = (() => {
   let _hiddenContactIds = new Set();
   let _activeTypeFilter = 'all';
   let _activeColorFilter = 'all';
+  let _activeSearchQuery = '';
 
   // ── Project list ──────────────────────────────────────────────────────────
 
@@ -102,6 +103,7 @@ const TL_PROJECTS = (() => {
     _hiddenContactIds = new Set();
     _activeTypeFilter = 'all';
     _activeColorFilter = 'all';
+    _activeSearchQuery = '';
 
     document.getElementById('proj-name').textContent = project.name;
     document.getElementById('proj-sub').textContent =
@@ -110,6 +112,10 @@ const TL_PROJECTS = (() => {
     _renderContactToggles();
     _resetProjectTypeFilters();
     _resetProjectColorFilters();
+    const searchInput = document.getElementById('project-timeline-search');
+    const searchClear = document.getElementById('project-timeline-search-clear');
+    if (searchInput) searchInput.value = '';
+    if (searchClear) searchClear.classList.remove('visible');
     _renderTimeline();
     TL_APP.showView('view-project-detail');
   }
@@ -188,6 +194,30 @@ const TL_PROJECTS = (() => {
     bar.innerHTML = TL_TIMELINE.colorFilterChipsHTML(_activeColorFilter);
   }
 
+  // ── Search ─────────────────────────────────────────────────────────────
+  // Searches within this project's merged entries — distinct from the
+  // contacts-list search. Combines with the active type/color filters.
+
+  function _wireProjectSearch() {
+    const input = document.getElementById('project-timeline-search');
+    const clearBtn = document.getElementById('project-timeline-search-clear');
+    if (!input) return;
+
+    input.addEventListener('input', () => {
+      _activeSearchQuery = input.value;
+      clearBtn?.classList.toggle('visible', input.value.length > 0);
+      _renderTimeline();
+    });
+
+    clearBtn?.addEventListener('click', () => {
+      input.value = '';
+      _activeSearchQuery = '';
+      clearBtn.classList.remove('visible');
+      _renderTimeline();
+      input.focus();
+    });
+  }
+
   function _renderTimeline() {
     const tl = document.getElementById('project-timeline');
     if (!tl || !_currentProject) return;
@@ -212,6 +242,7 @@ const TL_PROJECTS = (() => {
     const entries = TL_DB.getProjectEntries(_currentProject.id, {
       type: _activeTypeFilter === 'all' ? null : _activeTypeFilter,
       color: _activeColorFilter === 'all' ? null : _activeColorFilter,
+      q: _activeSearchQuery || null,
       excludeContactIds: [..._hiddenContactIds],
       limit: 300,
     });
@@ -220,7 +251,7 @@ const TL_PROJECTS = (() => {
       tl.innerHTML = `
         <div class="tl-empty">
           <i class="ti ti-timeline"></i>
-          No entries match this filter.<br>Try a different filter, or log activity against one of the linked contacts.
+          ${_activeSearchQuery ? `No entries match "${TL_APP._esc(_activeSearchQuery)}".<br>Try a different search or filter.` : 'No entries match this filter.<br>Try a different filter, or log activity against one of the linked contacts.'}
         </div>`;
       return;
     }
@@ -318,6 +349,7 @@ const TL_PROJECTS = (() => {
     _wireContactToggles();
     _wireProjectTypeFilters();
     _wireProjectColorFilters();
+    _wireProjectSearch();
     _wireProjectTimelineClicks();
   }
 

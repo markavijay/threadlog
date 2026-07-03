@@ -10,6 +10,7 @@ const TL_APP = (() => {
   let _activeTypeFilter = 'all';
   let _activeTopicId = null;
   let _activeColorFilter = 'all';
+  let _activeSearchQuery = '';
   let _deferredInstallPrompt = null;
 
   // ── Boot ──────────────────────────────────────────────────────────────────
@@ -24,6 +25,7 @@ const TL_APP = (() => {
       _wireContactList();
       _wireTypeFilters();
       _wireColorFilters();
+      _wireTimelineSearch();
       _wireQuickAdd();
       _wireSearch();
       TL_PROJECTS.init();
@@ -160,6 +162,7 @@ const TL_APP = (() => {
     _activeTypeFilter = 'all';
     _activeTopicId = null;
     _activeColorFilter = 'all';
+    _activeSearchQuery = '';
 
     // Header
     const av = document.getElementById('tl-avatar');
@@ -170,9 +173,13 @@ const TL_APP = (() => {
     _renderContactProjects(contactId);
 
     TL_TIMELINE.renderTopics(contact);
-    TL_TIMELINE.renderEntries(contact.id, { type: null, topicId: null, color: null });
+    TL_TIMELINE.renderEntries(contact.id, { type: null, topicId: null, color: null, q: null });
     _resetTypeFilters();
     _resetColorFilters();
+    const tlSearchInput = document.getElementById('timeline-search');
+    const tlSearchClear = document.getElementById('timeline-search-clear');
+    if (tlSearchInput) tlSearchInput.value = '';
+    if (tlSearchClear) tlSearchClear.classList.remove('visible');
     showView('view-timeline');
   }
 
@@ -272,6 +279,19 @@ const TL_APP = (() => {
     });
   }
 
+  // Re-renders the current contact's timeline using whatever combination of
+  // type/topic/color/search filters is currently active. Single source of
+  // truth so each filter control doesn't need to know about the others.
+  function _refreshTimeline() {
+    if (!_currentContact) return;
+    TL_TIMELINE.renderEntries(_currentContact.id, {
+      type: _activeTypeFilter === 'all' ? null : _activeTypeFilter,
+      topicId: _activeTopicId,
+      color: _activeColorFilter === 'all' ? null : _activeColorFilter,
+      q: _activeSearchQuery || null,
+    });
+  }
+
   // ── Type Filters ──────────────────────────────────────────────────────────
 
   function _wireTypeFilters() {
@@ -280,13 +300,7 @@ const TL_APP = (() => {
       if (!chip) return;
       _activeTypeFilter = chip.dataset.filter;
       _resetTypeFilters(chip);
-      if (_currentContact) {
-        TL_TIMELINE.renderEntries(_currentContact.id, {
-          type: _activeTypeFilter === 'all' ? null : _activeTypeFilter,
-          topicId: _activeTopicId,
-          color: _activeColorFilter === 'all' ? null : _activeColorFilter,
-        });
-      }
+      _refreshTimeline();
     });
   }
 
@@ -311,13 +325,7 @@ const TL_APP = (() => {
       if (!chip) return;
       _activeColorFilter = chip.dataset.color;
       _resetColorFilters();
-      if (_currentContact) {
-        TL_TIMELINE.renderEntries(_currentContact.id, {
-          type: _activeTypeFilter === 'all' ? null : _activeTypeFilter,
-          topicId: _activeTopicId,
-          color: _activeColorFilter === 'all' ? null : _activeColorFilter,
-        });
-      }
+      _refreshTimeline();
     });
   }
 
@@ -325,6 +333,31 @@ const TL_APP = (() => {
     const bar = document.getElementById('color-filters');
     if (!bar) return;
     bar.innerHTML = TL_TIMELINE.colorFilterChipsHTML(_activeColorFilter);
+  }
+
+  // ── Timeline Search ──────────────────────────────────────────────────────
+  // Searches within the currently open contact's own entries (subject/body/
+  // doc name) — distinct from the contacts-list search, which searches across
+  // every contact. Combines with whichever type/topic/color filters are active.
+
+  function _wireTimelineSearch() {
+    const input = document.getElementById('timeline-search');
+    const clearBtn = document.getElementById('timeline-search-clear');
+    if (!input) return;
+
+    input.addEventListener('input', () => {
+      _activeSearchQuery = input.value;
+      clearBtn?.classList.toggle('visible', input.value.length > 0);
+      _refreshTimeline();
+    });
+
+    clearBtn?.addEventListener('click', () => {
+      input.value = '';
+      _activeSearchQuery = '';
+      clearBtn.classList.remove('visible');
+      _refreshTimeline();
+      input.focus();
+    });
   }
 
   // ── Quick Add ─────────────────────────────────────────────────────────────
@@ -339,7 +372,7 @@ const TL_APP = (() => {
     });
   }
 
-  // ── Search ────────────────────────────────────────────────────────────────
+  // ── Search (contacts list) ─────────────────────────────────────────────────
 
   function _wireSearch() {
     const input = document.getElementById('contact-search');
@@ -362,13 +395,7 @@ const TL_APP = (() => {
 
   function setTopicFilter(topicId) {
     _activeTopicId = topicId;
-    if (_currentContact) {
-      TL_TIMELINE.renderEntries(_currentContact.id, {
-        type: _activeTypeFilter === 'all' ? null : _activeTypeFilter,
-        topicId,
-        color: _activeColorFilter === 'all' ? null : _activeColorFilter,
-      });
-    }
+    _refreshTimeline();
   }
 
   // ── Toast ─────────────────────────────────────────────────────────────────
@@ -433,6 +460,7 @@ const TL_APP = (() => {
     get activeTypeFilter() { return _activeTypeFilter; },
     get activeTopicId() { return _activeTopicId; },
     get activeColorFilter() { return _activeColorFilter; },
+    get activeSearchQuery() { return _activeSearchQuery; },
     refreshContactHeader,
     _esc,
     _relDate,

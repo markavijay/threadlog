@@ -73,16 +73,16 @@ const TL_TIMELINE = (() => {
 
   // ── Timeline entries ──────────────────────────────────────────────────────
 
-  function renderEntries(contactId, { type = null, topicId = null, color = null } = {}) {
+  function renderEntries(contactId, { type = null, topicId = null, color = null, q = null } = {}) {
     const tl = document.getElementById('timeline');
-    const entries = TL_DB.getEntries(contactId, { type, topicId, color, limit: 200 });
+    const entries = TL_DB.getEntries(contactId, { type, topicId, color, q, limit: 200 });
 
     if (!entries.length) {
       tl.innerHTML = `
         <div class="tl-empty">
           <i class="ti ti-timeline"></i>
-          ${type || topicId || color
-            ? 'No entries match this filter.<br>Try a different filter or log a new entry below.'
+          ${type || topicId || color || q
+            ? (q ? `No entries match "${TL_APP._esc(q)}".<br>Try a different search or filter.` : 'No entries match this filter.<br>Try a different filter or log a new entry below.')
             : 'No activity logged yet.<br>Use the quick-add bar below to log your first entry.'}
         </div>`;
       return;
@@ -314,6 +314,7 @@ const TL_TIMELINE = (() => {
             type: TL_APP.activeTypeFilter === 'all' ? null : TL_APP.activeTypeFilter,
             topicId: TL_APP.activeTopicId,
             color: TL_APP.activeColorFilter === 'all' ? null : TL_APP.activeColorFilter,
+            q: TL_APP.activeSearchQuery || null,
           });
         }
       });
@@ -328,6 +329,7 @@ const TL_TIMELINE = (() => {
           type: TL_APP.activeTypeFilter === 'all' ? null : TL_APP.activeTypeFilter,
           topicId: TL_APP.activeTopicId,
           color: TL_APP.activeColorFilter === 'all' ? null : TL_APP.activeColorFilter,
+          q: TL_APP.activeSearchQuery || null,
         });
         TL_APP.toast('Entry deleted');
       }

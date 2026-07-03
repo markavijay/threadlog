@@ -538,6 +538,13 @@
       <button class="icon-btn" id="btn-add-reminder" title="Add reminder"><i class="ti ti-bell"></i></button>
       <button class="icon-btn" id="btn-contact-menu" title="Options"><i class="ti ti-dots-vertical"></i></button>
     </div>
+    <div class="search-wrap">
+      <div class="search-inner">
+        <i class="ti ti-search"></i>
+        <input type="text" id="timeline-search" placeholder="Search this timeline…" autocomplete="off" />
+        <button class="search-clear" id="timeline-search-clear"><i class="ti ti-x"></i></button>
+      </div>
+    </div>
     <div class="filter-scroll" id="type-filters">
       <div class="chip active-all" data-filter="all"><i class="ti ti-layout-list"></i> All</div>
       <div class="chip" data-filter="call"><i class="ti ti-phone"></i> Calls</div>
@@ -591,6 +598,13 @@
         <div class="header-sub" id="proj-sub"></div>
       </div>
       <button class="icon-btn" id="btn-project-menu" title="Options"><i class="ti ti-dots-vertical"></i></button>
+    </div>
+    <div class="search-wrap">
+      <div class="search-inner">
+        <i class="ti ti-search"></i>
+        <input type="text" id="project-timeline-search" placeholder="Search this project…" autocomplete="off" />
+        <button class="search-clear" id="project-timeline-search-clear"><i class="ti ti-x"></i></button>
+      </div>
     </div>
     <div class="topic-scroll" id="project-contact-toggles">
       <!-- Populated by JS: per-contact toggle chips (Section 7.4) -->

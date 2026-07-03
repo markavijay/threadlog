@@ -661,7 +661,7 @@ var TL_DB = (function() {
     return _rows(stmt);
   }
 
-  function getEntries(contactId, { type = null, topicId = null, color = null, limit = 200, offset = 0 } = {}) {
+  function getEntries(contactId, { type = null, topicId = null, color = null, q = null, limit = 200, offset = 0 } = {}) {
     let sql = `
       SELECT e.* FROM entries e
       WHERE e.contact_id = ?
@@ -669,6 +669,11 @@ var TL_DB = (function() {
     const params = [contactId];
     if (type) { sql += ` AND e.type = ?`; params.push(type); }
     if (color) { sql += ` AND e.highlight_color = ?`; params.push(color); }
+    if (q && q.trim()) {
+      sql += ` AND (e.subject LIKE ? OR e.body LIKE ? OR e.doc_name LIKE ?)`;
+      const like = `%${q.trim()}%`;
+      params.push(like, like, like);
+    }
     if (topicId) {
       sql += ` AND EXISTS (SELECT 1 FROM entry_topics et WHERE et.entry_id = e.id AND et.topic_id = ?)`;
       params.push(topicId);
@@ -898,7 +903,7 @@ var TL_DB = (function() {
   // Merged chronological timeline across every contact linked to a project.
   // excludeContactIds implements the per-contact toggle (Section 7.4) — toggled-off
   // contacts are simply excluded from the merged query rather than deleted from the project.
-  function getProjectEntries(projectId, { type = null, topicId = null, color = null, excludeContactIds = [], limit = 300, offset = 0 } = {}) {
+  function getProjectEntries(projectId, { type = null, topicId = null, color = null, q = null, excludeContactIds = [], limit = 300, offset = 0 } = {}) {
     let sql = `
       SELECT e.*, c.first_name AS c_first_name, c.last_name AS c_last_name,
              c.descriptor AS c_descriptor, c.avatar_color AS c_avatar_color
@@ -914,6 +919,11 @@ var TL_DB = (function() {
     }
     if (type) { sql += ` AND e.type = ?`; params.push(type); }
     if (color) { sql += ` AND e.highlight_color = ?`; params.push(color); }
+    if (q && q.trim()) {
+      sql += ` AND (e.subject LIKE ? OR e.body LIKE ? OR e.doc_name LIKE ?)`;
+      const like = `%${q.trim()}%`;
+      params.push(like, like, like);
+    }
     if (topicId) {
       sql += ` AND EXISTS (SELECT 1 FROM entry_topics et WHERE et.entry_id = e.id AND et.topic_id = ?)`;
       params.push(topicId);
