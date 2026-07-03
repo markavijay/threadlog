@@ -359,6 +359,14 @@ const TL_CONTACTS = (() => {
     TL_SHEETS.close();
     TL_APP.toast(`${first} added`);
     render();
+
+    // If Google's connected and this contact has an email, pull their history in
+    // right away instead of waiting for the next scheduled sync (up to 30 min later).
+    if (emails.length && TL_DB.getSetting('google_connected') === 'true') {
+      TL_SYNC.syncGmail();
+      TL_SYNC.syncCalendar();
+    }
+
     // Open their timeline immediately
     setTimeout(() => TL_APP.openContact(id), 300);
   }
@@ -653,8 +661,13 @@ const TL_CONTACTS = (() => {
 
       // Update emails — delete all and re-insert
       TL_DB._db()?.run(`DELETE FROM contact_emails WHERE contact_id = ?`, [contact.id]);
+      const newEmails = [];
       document.querySelectorAll('#ec-emails .ec-email-input').forEach(inp => {
-        if (inp.value.trim()) TL_DB._db()?.run(`INSERT INTO contact_emails(contact_id,email) VALUES(?,?)`, [contact.id, inp.value.trim()]);
+        const val = inp.value.trim();
+        if (val) {
+          TL_DB._db()?.run(`INSERT INTO contact_emails(contact_id,email) VALUES(?,?)`, [contact.id, val]);
+          newEmails.push(val);
+        }
       });
 
       // Topics
@@ -667,6 +680,13 @@ const TL_CONTACTS = (() => {
       TL_APP.toast('Contact updated');
       TL_CONTACTS.render();
       TL_APP.openContact(contact.id);
+
+      // Pull in this contact's Gmail history right away if an email was added/changed,
+      // instead of waiting for the next scheduled sync (up to 30 min later).
+      if (newEmails.length && TL_DB.getSetting('google_connected') === 'true') {
+        TL_SYNC.syncGmail();
+        TL_SYNC.syncCalendar();
+      }
     });
   }
 
