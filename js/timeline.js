@@ -185,9 +185,19 @@ const TL_TIMELINE = (() => {
 
     const autoBadge = e.auto_captured ? `<span class="auto-badge">AUTO</span>` : '';
 
+    // In a merged Project timeline, each entry carries a `.contact` object so the
+    // card can show whose interaction this is (Section 7.3).
+    const contactBadge = e.contact ? `
+      <span style="display:inline-flex;align-items:center;gap:5px;margin-right:2px">
+        <span class="mini-av av-${e.contact.avatar_color || 'teal'}" style="width:18px;height:18px;font-size:9px">${TL_APP._esc(e.contact.initials)}</span>
+        <span style="font-size:12px;font-weight:500;color:var(--text-secondary)">${TL_APP._esc(e.contact.first_name)}</span>
+      </span>
+      <span style="color:var(--text-tertiary);font-size:11px">·</span>` : '';
+
     return `
-      <div class="tl-card" data-type="${e.type}" data-entry-id="${e.id}">
+      <div class="tl-card" data-type="${e.type}" data-entry-id="${e.id}"${e.contact ? ` data-contact-id="${e.contact.id}"` : ''}>
         <div class="card-header">
+          ${contactBadge}
           <div class="type-badge ${meta.badge}"><i class="ti ${meta.icon}"></i></div>
           <span class="card-type-name">${meta.label}</span>
           ${autoBadge}
@@ -294,6 +304,14 @@ const TL_TIMELINE = (() => {
 
   // ── Public ────────────────────────────────────────────────────────────────
 
-  return { renderTopics, renderEntries };
+  return {
+    renderTopics, renderEntries,
+    // Exposed so TL_PROJECTS can reuse the same grouping/card rendering
+    // for the merged project timeline instead of duplicating formatting logic.
+    groupByDate: _groupByDate,
+    entryCardHTML: _entryCardHTML,
+    openEntryDetail: _openEntryDetail,
+    formatDuration: _formatDuration,
+  };
 
 })();

@@ -24,6 +24,7 @@ const TL_APP = (() => {
       _wireTypeFilters();
       _wireQuickAdd();
       _wireSearch();
+      TL_PROJECTS.init();
       _checkUrlParams();
       TL_CONTACTS.render();
       // If contacts list is empty after Google redirect, DB may need a moment
@@ -163,6 +164,7 @@ const TL_APP = (() => {
     av.textContent = contact.initials;
     document.getElementById('tl-name').textContent = contact.display_name;
     document.getElementById('tl-sub').textContent = _lastActivityLabel(contactId);
+    _renderContactProjects(contactId);
 
     TL_TIMELINE.renderTopics(contact);
     TL_TIMELINE.renderEntries(contact.id, { type: null, topicId: null });
@@ -170,9 +172,27 @@ const TL_APP = (() => {
     showView('view-timeline');
   }
 
+  // Renders the (optional) #tl-projects-row element with chips for any active/on-hold
+  // projects this contact belongs to (Section 5.1 / 8.2 — "the project(s) that contact
+  // belongs to"). Safe no-op if the element isn't present in the current markup.
+  function _renderContactProjects(contactId) {
+    const row = document.getElementById('tl-projects-row');
+    if (!row) return;
+    const projects = TL_DB.getContactProjects(contactId);
+    if (!projects.length) { row.innerHTML = ''; row.style.display = 'none'; return; }
+    row.style.display = 'flex';
+    row.innerHTML = projects.map(p => `
+      <span class="project-chip" data-project-id="${p.id}"><i class="ti ti-folder"></i>${_esc(p.name)}</span>`).join('');
+    row.onclick = e => {
+      const chip = e.target.closest('.project-chip');
+      if (chip) TL_PROJECTS.openProject(parseInt(chip.dataset.projectId));
+    };
+  }
+
   function refreshContactHeader() {
     if (!_currentContact) return;
     document.getElementById('tl-sub').textContent = _lastActivityLabel(_currentContact.id);
+    _renderContactProjects(_currentContact.id);
   }
 
   function _lastActivityLabel(contactId) {
@@ -208,6 +228,12 @@ const TL_APP = (() => {
 
     document.getElementById('btn-reminders-global').addEventListener('click', () => {
       TL_SHEETS.openGlobalReminders();
+    });
+
+    document.getElementById('btn-projects-global').addEventListener('click', () => {
+      _currentContact = null;
+      TL_PROJECTS.render();
+      showView('view-projects');
     });
 
     document.getElementById('btn-add-reminder').addEventListener('click', () => {
@@ -326,10 +352,14 @@ const TL_APP = (() => {
 
   function showCallReminders(contact) {
     const reminders = TL_DB.getCallReminders(contact.id);
-    if (!reminders.length) return;
+    const projects = TL_DB.getContactProjects(contact.id);
+    if (!reminders.length && !projects.length) return;
 
     document.getElementById('call-rem-title').textContent = `Before you speak with ${contact.first_name}`;
-    document.getElementById('call-rem-count').textContent = `${reminders.length} reminder${reminders.length > 1 ? 's' : ''}`;
+    const parts = [];
+    if (projects.length) parts.push(projects.map(p => p.name).join(', '));
+    if (reminders.length) parts.push(`${reminders.length} reminder${reminders.length > 1 ? 's' : ''}`);
+    document.getElementById('call-rem-count').textContent = parts.join(' · ');
 
     const list = document.getElementById('call-rem-list');
     list.innerHTML = reminders.map(r => `

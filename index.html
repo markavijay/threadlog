@@ -405,6 +405,79 @@
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 2px; }
 
+    /* ── Projects ─────────────────────────────────────────────────────────── */
+    .tl-projects-row { display: none; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
+    .project-chip {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 11px; font-weight: 500; padding: 3px 9px; border-radius: var(--radius-xl);
+      background: var(--tl-accent-light); color: var(--tl-accent-text);
+      cursor: pointer; white-space: nowrap;
+    }
+    .project-chip i { font-size: 11px; }
+
+    .mini-av {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 20px; height: 20px; border-radius: 50%;
+      font-size: 10px; font-weight: 600; flex-shrink: 0;
+    }
+    .mini-av.av-teal   { background: #E1F5EE; color: #085041; }
+    .mini-av.av-blue   { background: #E6F1FB; color: #0C447C; }
+    .mini-av.av-amber  { background: #FAEEDA; color: #633806; }
+    .mini-av.av-coral  { background: #FAECE7; color: #712B13; }
+    .mini-av.av-purple { background: #EEEDFE; color: #3C3489; }
+    .mini-av.av-green  { background: #EAF3DE; color: #27500A; }
+
+    .project-row {
+      display: flex; align-items: center; gap: 12px;
+      padding: 10px 16px; border-bottom: 1px solid var(--border);
+      cursor: pointer; transition: background 0.1s;
+    }
+    .project-row:active { background: var(--bg-secondary); }
+    .stacked-avatars { display: flex; flex-shrink: 0; }
+    .stacked-av {
+      width: 30px; height: 30px; font-size: 12px;
+      border: 2px solid var(--bg); margin-left: -8px;
+    }
+    .stacked-av:first-child { margin-left: 0; }
+    .av-grey { background: var(--bg-secondary); color: var(--text-tertiary); }
+    .project-info { flex: 1; min-width: 0; }
+    .project-name { font-size: 15px; font-weight: 500; color: var(--text-primary); }
+    .project-meta { font-size: 12px; color: var(--text-tertiary); margin-top: 2px; }
+    .proj-status-badge {
+      font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+      color: #854F0B; background: #FAEEDA; padding: 3px 8px; border-radius: var(--radius-xl);
+      flex-shrink: 0;
+    }
+
+    .contact-toggle-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 5px 10px 5px 5px; border-radius: var(--radius-xl);
+      border: 1px solid var(--border); font-size: 12px; font-weight: 500;
+      color: var(--text-tertiary); cursor: pointer; white-space: nowrap;
+      opacity: 0.5; transition: all 0.1s; flex-shrink: 0;
+    }
+    .contact-toggle-chip.active {
+      color: var(--text-primary); border-color: var(--tl-accent);
+      opacity: 1; background: var(--tl-accent-light);
+    }
+    .contact-toggle-manage {
+      opacity: 1; color: var(--tl-accent-text); border-style: dashed; padding: 5px 10px;
+    }
+
+    .project-picker-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 0; border-bottom: 1px solid var(--border); cursor: pointer;
+    }
+    .project-picker-row .avatar { width: 34px; height: 34px; font-size: 13px; }
+    .project-picker-check {
+      margin-left: auto; width: 20px; height: 20px; border-radius: 50%;
+      border: 1.5px solid var(--border); display: flex; align-items: center; justify-content: center;
+      color: transparent; font-size: 12px; flex-shrink: 0;
+    }
+    .project-picker-row.selected .project-picker-check {
+      background: var(--tl-accent); border-color: var(--tl-accent); color: #fff;
+    }
+
     /* ── Reduced motion ───────────────────────────────────────────────────── */
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
@@ -433,6 +506,7 @@
   <div class="view active" id="view-contacts">
     <div class="topbar">
       <span class="topbar-title">ThreadLog</span>
+      <button class="icon-btn" id="btn-projects-global" title="Projects"><i class="ti ti-folders"></i></button>
       <button class="icon-btn" id="btn-reminders-global" title="Reminders"><i class="ti ti-bell"></i></button>
       <button class="icon-btn" id="btn-settings" title="Settings"><i class="ti ti-settings"></i></button>
     </div>
@@ -459,6 +533,7 @@
       <div class="header-info">
         <div class="header-name" id="tl-name"></div>
         <div class="header-sub" id="tl-sub"></div>
+        <div class="tl-projects-row" id="tl-projects-row"></div>
       </div>
       <button class="icon-btn" id="btn-add-reminder" title="Add reminder"><i class="ti ti-bell"></i></button>
       <button class="icon-btn" id="btn-contact-menu" title="Options"><i class="ti ti-dots-vertical"></i></button>
@@ -487,6 +562,48 @@
       <button class="qa-btn" data-entry-type="wa"><i class="ti ti-brand-whatsapp"></i>WhatsApp</button>
       <button class="qa-btn" data-entry-type="doc"><i class="ti ti-file"></i>Doc</button>
       <button class="qa-btn" data-entry-type="note"><i class="ti ti-notes"></i>Note</button>
+    </div>
+  </div>
+
+  <!-- ── View: Projects List ─────────────────────────────────────────────── -->
+  <div class="view" id="view-projects">
+    <div class="topbar">
+      <button class="icon-btn back-btn" id="btn-back-projects-to-contacts"><i class="ti ti-arrow-left"></i></button>
+      <span class="topbar-title">Projects</span>
+    </div>
+    <div class="contact-list" id="project-list">
+      <!-- Populated by JS -->
+    </div>
+    <button class="fab" id="fab-add-project" title="New project">
+      <i class="ti ti-plus"></i>
+    </button>
+  </div>
+
+  <!-- ── View: Project Detail (merged timeline) ──────────────────────────── -->
+  <div class="view" id="view-project-detail">
+    <div class="contact-header">
+      <button class="icon-btn back-btn" id="btn-back-projects"><i class="ti ti-arrow-left"></i></button>
+      <div class="header-info">
+        <div class="header-name" id="proj-name"></div>
+        <div class="header-sub" id="proj-sub"></div>
+      </div>
+      <button class="icon-btn" id="btn-project-menu" title="Options"><i class="ti ti-dots-vertical"></i></button>
+    </div>
+    <div class="topic-scroll" id="project-contact-toggles">
+      <!-- Populated by JS: per-contact toggle chips (Section 7.4) -->
+    </div>
+    <div class="filter-scroll" id="project-type-filters">
+      <div class="chip active-all" data-filter="all"><i class="ti ti-layout-list"></i> All</div>
+      <div class="chip" data-filter="call"><i class="ti ti-phone"></i> Calls</div>
+      <div class="chip" data-filter="sms"><i class="ti ti-message"></i> SMS</div>
+      <div class="chip" data-filter="email"><i class="ti ti-mail"></i> Email</div>
+      <div class="chip" data-filter="meet"><i class="ti ti-video"></i> Meetings</div>
+      <div class="chip" data-filter="wa"><i class="ti ti-brand-whatsapp"></i> WhatsApp</div>
+      <div class="chip" data-filter="doc"><i class="ti ti-file"></i> Docs</div>
+      <div class="chip" data-filter="note"><i class="ti ti-notes"></i> Notes</div>
+    </div>
+    <div class="timeline" id="project-timeline">
+      <!-- Populated by JS -->
     </div>
   </div>
 
@@ -520,6 +637,7 @@
 <script src="js/db.js"></script>
 <script src="js/contacts.js"></script>
 <script src="js/timeline.js"></script>
+<script src="js/projects.js"></script>
 <script src="js/reminders.js"></script>
 <script src="js/sync.js"></script>
 <script src="js/sheets.js"></script>

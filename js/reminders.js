@@ -71,8 +71,11 @@ const TL_REMINDERS = (() => {
   function checkCallReminders(contactId) {
     const contact = TL_DB.getContact(contactId);
     if (!contact) return;
+    // Overlay fires if there's a flagged reminder OR the contact belongs to a project
+    // (Section 8.2: overlay shows contact name, project(s), and the relevant note).
     const reminders = TL_DB.getCallReminders(contactId);
-    if (!reminders.length) return;
+    const projects = TL_DB.getContactProjects(contactId);
+    if (!reminders.length && !projects.length) return;
     TL_APP.showCallReminders(contact);
   }
 

@@ -775,6 +775,226 @@ const TL_SHEETS = (() => {
     open();
   }
 
+  // ── Projects ──────────────────────────────────────────────────────────────
+
+  function _statusBtnHTML(active) {
+    return `
+      <div class="dir-toggle" id="pj-status-toggle">
+        <div class="dir-btn${active === 'active' ? ' active' : ''}" data-status="active">Active</div>
+        <div class="dir-btn${active === 'on_hold' ? ' active' : ''}" data-status="on_hold">On hold</div>
+        <div class="dir-btn${active === 'closed' ? ' active' : ''}" data-status="closed">Closed</div>
+      </div>`;
+  }
+
+  function _contactPickerListHTML(allContacts, selectedIds) {
+    if (!allContacts.length) {
+      return `<div style="padding:16px 0;color:var(--text-tertiary);font-size:13px;text-align:center">No contacts yet — add contacts first.</div>`;
+    }
+    return allContacts.map(c => `
+      <div class="project-picker-row${selectedIds.has(c.id) ? ' selected' : ''}" data-contact-id="${c.id}">
+        <div class="avatar av-${c.avatar_color || 'teal'}">${TL_APP._esc(c.initials)}</div>
+        <div>
+          <div style="font-size:14px;color:var(--text-primary)">${TL_APP._esc(c.display_name)}</div>
+        </div>
+        <div class="project-picker-check"><i class="ti ti-check"></i></div>
+      </div>`).join('');
+  }
+
+  function openAddProject() {
+    TL_PROJECTS.injectStyles();
+    TL_CONTACTS.injectFormStyles();
+    const content = document.getElementById('sheet-content');
+    const allContacts = TL_DB.getContacts();
+    const selected = new Set();
+
+    content.innerHTML = `
+      <div class="sheet-handle"></div>
+      <div class="sheet-header">
+        <span class="sheet-title">New project</span>
+        <button class="text-btn" id="pj-save">Save</button>
+      </div>
+      <div style="padding:0 16px 32px">
+        <div class="form-section-label">Name</div>
+        <div class="form-field">
+          <i class="ti ti-folder form-field-icon"></i>
+          <div class="form-field-inner">
+            <input type="text" id="pj-name" placeholder="e.g. Pricing Negotiation — ABC Corp" class="form-input" autocomplete="off" />
+          </div>
+        </div>
+        <div class="form-section-label">Description</div>
+        <div class="form-field" style="align-items:flex-start">
+          <i class="ti ti-notes form-field-icon" style="margin-top:2px"></i>
+          <div class="form-field-inner">
+            <textarea id="pj-desc" class="form-input form-textarea" rows="2" placeholder="Optional"></textarea>
+          </div>
+        </div>
+        <div class="form-section-label">Status</div>
+        ${_statusBtnHTML('active')}
+
+        <div class="form-section-label" style="margin-top:12px">Contacts</div>
+        <div id="pj-contacts-list">${_contactPickerListHTML(allContacts, selected)}</div>
+      </div>`;
+
+    document.getElementById('pj-status-toggle').addEventListener('click', e => {
+      const btn = e.target.closest('.dir-btn');
+      if (!btn) return;
+      document.querySelectorAll('#pj-status-toggle .dir-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    });
+
+    document.getElementById('pj-contacts-list').addEventListener('click', e => {
+      const row = e.target.closest('.project-picker-row');
+      if (!row) return;
+      const cid = parseInt(row.dataset.contactId);
+      row.classList.toggle('selected');
+      if (row.classList.contains('selected')) selected.add(cid);
+      else selected.delete(cid);
+    });
+
+    document.getElementById('pj-save').addEventListener('click', () => {
+      const name = document.getElementById('pj-name').value.trim();
+      if (!name) { document.getElementById('pj-name').focus(); return; }
+      const statusBtn = document.querySelector('#pj-status-toggle .dir-btn.active');
+      const id = TL_DB.createProject({
+        name,
+        description: document.getElementById('pj-desc').value.trim(),
+        status: statusBtn?.dataset.status || 'active',
+        contact_ids: [...selected],
+      });
+      TL_DB.persist();
+      close();
+      TL_APP.toast('Project created');
+      TL_PROJECTS.render();
+      TL_PROJECTS.openProject(id);
+    });
+
+    open();
+  }
+
+  function openEditProject(project) {
+    TL_PROJECTS.injectStyles();
+    TL_CONTACTS.injectFormStyles();
+    const content = document.getElementById('sheet-content');
+
+    content.innerHTML = `
+      <div class="sheet-handle"></div>
+      <div class="sheet-header">
+        <span class="sheet-title">Edit project</span>
+        <button class="text-btn" id="pj-save">Save</button>
+      </div>
+      <div style="padding:0 16px 32px">
+        <div class="form-section-label">Name</div>
+        <div class="form-field">
+          <i class="ti ti-folder form-field-icon"></i>
+          <div class="form-field-inner">
+            <input type="text" id="pj-name" class="form-input" value="${TL_APP._esc(project.name)}" autocomplete="off" />
+          </div>
+        </div>
+        <div class="form-section-label">Description</div>
+        <div class="form-field" style="align-items:flex-start">
+          <i class="ti ti-notes form-field-icon" style="margin-top:2px"></i>
+          <div class="form-field-inner">
+            <textarea id="pj-desc" class="form-input form-textarea" rows="2">${TL_APP._esc(project.description || '')}</textarea>
+          </div>
+        </div>
+        <div class="form-section-label">Status</div>
+        ${_statusBtnHTML(project.status)}
+
+        <div style="height:8px"></div>
+        <button onclick="TL_PROJECTS.deleteProject(${project.id})"
+          style="width:100%;padding:11px;border-radius:var(--radius-lg);background:none;border:1px solid #F09595;color:#A32D2D;font-size:14px;font-weight:500;cursor:pointer;font-family:var(--font)">
+          <i class="ti ti-trash"></i> Delete project
+        </button>
+      </div>`;
+
+    document.getElementById('pj-status-toggle').addEventListener('click', e => {
+      const btn = e.target.closest('.dir-btn');
+      if (!btn) return;
+      document.querySelectorAll('#pj-status-toggle .dir-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    });
+
+    document.getElementById('pj-save').addEventListener('click', () => {
+      const name = document.getElementById('pj-name').value.trim();
+      if (!name) { document.getElementById('pj-name').focus(); return; }
+      const statusBtn = document.querySelector('#pj-status-toggle .dir-btn.active');
+      TL_DB.updateProject(project.id, {
+        name,
+        description: document.getElementById('pj-desc').value.trim(),
+        status: statusBtn?.dataset.status || project.status,
+      });
+      TL_DB.persist();
+      close();
+      TL_APP.toast('Project updated');
+      TL_PROJECTS.render();
+      TL_PROJECTS.refreshCurrentProject();
+    });
+
+    open();
+  }
+
+  // Add/remove contacts from a project — many-to-many (Section 7.2)
+  function openProjectContactPicker(project) {
+    TL_PROJECTS.injectStyles();
+    TL_CONTACTS.injectFormStyles();
+    const content = document.getElementById('sheet-content');
+    const allContacts = TL_DB.getContacts();
+    const linked = new Set(TL_DB.getProjectContacts(project.id).map(c => c.id));
+
+    content.innerHTML = `
+      <div class="sheet-handle"></div>
+      <div class="sheet-header">
+        <span class="sheet-title">Contacts — ${TL_APP._esc(project.name)}</span>
+        <button class="icon-btn" onclick="TL_SHEETS.close();TL_PROJECTS.refreshCurrentProject();TL_PROJECTS.render()"><i class="ti ti-check"></i></button>
+      </div>
+      <div style="padding:0 16px 32px">
+        <div id="pj-contacts-list">${_contactPickerListHTML(allContacts, linked)}</div>
+      </div>`;
+
+    document.getElementById('pj-contacts-list').addEventListener('click', e => {
+      const row = e.target.closest('.project-picker-row');
+      if (!row) return;
+      const cid = parseInt(row.dataset.contactId);
+      const nowSelected = !row.classList.contains('selected');
+      row.classList.toggle('selected');
+      if (nowSelected) TL_DB.addContactToProject(project.id, cid);
+      else TL_DB.removeContactFromProject(project.id, cid);
+      TL_DB.persist();
+    });
+
+    open();
+  }
+
+  // ── Project menu ──────────────────────────────────────────────────────────
+
+  function openProjectMenu(project) {
+    TL_CONTACTS.injectFormStyles();
+    const content = document.getElementById('sheet-content');
+    content.innerHTML = `
+      <div class="sheet-handle"></div>
+      <div style="padding:16px">
+        <div style="margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--border)">
+          <div style="font-size:16px;font-weight:500;color:var(--text-primary)">${TL_APP._esc(project.name)}</div>
+          <div style="font-size:12px;color:var(--text-tertiary);margin-top:2px">${project.contacts.length} contact${project.contacts.length !== 1 ? 's' : ''}</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:2px">
+          <button onclick="TL_SHEETS.openEditProject(TL_DB.getProject(${project.id}))" class="menu-item-btn"><i class="ti ti-edit"></i> Edit project</button>
+          <button onclick="TL_SHEETS.openProjectContactPicker(TL_DB.getProject(${project.id}))" class="menu-item-btn"><i class="ti ti-users-plus"></i> Manage contacts</button>
+          <button onclick="TL_PROJECTS.deleteProject(${project.id})" class="menu-item-btn" style="color:#E24B4A"><i class="ti ti-trash"></i> Delete project</button>
+          <button onclick="TL_SHEETS.close()" class="menu-item-btn"><i class="ti ti-x"></i> Cancel</button>
+        </div>
+      </div>`;
+
+    // Reuses the .menu-item-btn style injected by openContactMenu; inject if not present yet.
+    if (!document.getElementById('menu-btn-style')) {
+      const s = document.createElement('style');
+      s.id = 'menu-btn-style';
+      s.textContent = `.menu-item-btn { display:flex;align-items:center;gap:10px;width:100%;padding:12px;background:none;border:none;border-radius:var(--radius-md);font-size:14px;color:var(--text-primary);font-family:var(--font);cursor:pointer;text-align:left; } .menu-item-btn:hover { background:var(--bg-secondary); } .menu-item-btn i { font-size:18px;color:var(--text-secondary);width:20px; }`;
+      document.head.appendChild(s);
+    }
+    open();
+  }
+
   // ── Public ────────────────────────────────────────────────────────────────
 
   return {
@@ -782,6 +1002,7 @@ const TL_SHEETS = (() => {
     openAddContact, openAddEntry,
     openAddReminder, openGlobalReminders,
     openContactMenu, openSettings,
+    openAddProject, openEditProject, openProjectContactPicker, openProjectMenu,
   };
 
 })();

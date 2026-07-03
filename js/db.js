@@ -108,10 +108,28 @@ var TL_DB = (function() {
       value       TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS projects (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      name        TEXT NOT NULL,
+      description TEXT,
+      status      TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','on_hold','closed')),
+      created_at  INTEGER NOT NULL,
+      updated_at  INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS project_contacts (
+      project_id  INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      contact_id  INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+      added_at    INTEGER NOT NULL,
+      PRIMARY KEY (project_id, contact_id)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_entries_contact    ON entries(contact_id, timestamp DESC);
     CREATE INDEX IF NOT EXISTS idx_entries_type       ON entries(type);
     CREATE INDEX IF NOT EXISTS idx_reminders_contact  ON reminders(contact_id, done, due_at);
     CREATE INDEX IF NOT EXISTS idx_reminders_due      ON reminders(due_at, done);
+    CREATE INDEX IF NOT EXISTS idx_project_contacts_project ON project_contacts(project_id);
+    CREATE INDEX IF NOT EXISTS idx_project_contacts_contact ON project_contacts(contact_id);
   `;
 
   // ─── Init ──────────────────────────────────────────────────────────────────
@@ -724,6 +742,133 @@ var TL_DB = (function() {
     _run(`DELETE FROM reminders WHERE id = ?`, [id]);
   }
 
+  // ─── Projects ──────────────────────────────────────────────────────────────
+
+  function getProjects({ status = null } = {}) {
+    let sql = `
+      SELECT p.*,
+        (SELECT COUNT(*) FROM project_contacts pc WHERE pc.project_id = p.id) AS contact_count,
+        (SELECT MAX(e.timestamp) FROM project_contacts pc
+           JOIN entries e ON e.contact_id = pc.contact_id
+           WHERE pc.project_id = p.id) AS last_activity
+      FROM projects p
+    `;
+    const params = [];
+    if (status) { sql += ` WHERE p.status = ?`; params.push(status); }
+    sql += ` ORDER BY CASE p.status WHEN 'active' THEN 0 WHEN 'on_hold' THEN 1 ELSE 2 END, last_activity DESC NULLS LAST, p.name ASC`;
+    const stmt = _db.prepare(sql);
+    stmt.bind(params);
+    const projects = _rows(stmt);
+    return projects.map(p => ({ ...p, contacts: getProjectContacts(p.id) }));
+  }
+
+  function getProject(id) {
+    const stmt = _db.prepare(`SELECT * FROM projects WHERE id = ?`);
+    stmt.bind([id]);
+    const p = _first(stmt);
+    if (!p) return null;
+    return { ...p, contacts: getProjectContacts(id) };
+  }
+
+  function getProjectContacts(projectId) {
+    const stmt = _db.prepare(`
+      SELECT c.* FROM contacts c
+      JOIN project_contacts pc ON pc.contact_id = c.id
+      WHERE pc.project_id = ?
+      ORDER BY c.first_name ASC
+    `);
+    stmt.bind([projectId]);
+    return _rows(stmt).map(c => ({ ...c, display_name: _displayName(c), initials: _initials(c) }));
+  }
+
+  // Active/on-hold projects a contact belongs to — used in contact header and call overlay (Section 8.2)
+  function getContactProjects(contactId) {
+    const stmt = _db.prepare(`
+      SELECT p.* FROM projects p
+      JOIN project_contacts pc ON pc.project_id = p.id
+      WHERE pc.contact_id = ? AND p.status != 'closed'
+      ORDER BY CASE p.status WHEN 'active' THEN 0 ELSE 1 END, p.name ASC
+    `);
+    stmt.bind([contactId]);
+    return _rows(stmt);
+  }
+
+  function createProject({ name, description = '', status = 'active', contact_ids = [] }) {
+    const now = _now();
+    const id = _run(
+      `INSERT INTO projects(name, description, status, created_at, updated_at) VALUES(?,?,?,?,?)`,
+      [name, description, status, now, now]
+    );
+    contact_ids.forEach(cid => addContactToProject(id, cid));
+    return id;
+  }
+
+  function updateProject(id, fields) {
+    const allowed = ['name', 'description', 'status'];
+    const sets = allowed.filter(f => fields[f] !== undefined).map(f => `${f} = ?`);
+    const vals = allowed.filter(f => fields[f] !== undefined).map(f => fields[f]);
+    if (!sets.length) return;
+    _run(`UPDATE projects SET ${sets.join(', ')}, updated_at = ? WHERE id = ?`, [...vals, _now(), id]);
+  }
+
+  function deleteProject(id) {
+    _run(`DELETE FROM projects WHERE id = ?`, [id]);
+  }
+
+  function addContactToProject(projectId, contactId) {
+    try {
+      _run(`INSERT OR IGNORE INTO project_contacts(project_id, contact_id, added_at) VALUES(?,?,?)`, [projectId, contactId, _now()]);
+    } catch (e) { /* already linked */ }
+    _run(`UPDATE projects SET updated_at = ? WHERE id = ?`, [_now(), projectId]);
+  }
+
+  function removeContactFromProject(projectId, contactId) {
+    _run(`DELETE FROM project_contacts WHERE project_id = ? AND contact_id = ?`, [projectId, contactId]);
+    _run(`UPDATE projects SET updated_at = ? WHERE id = ?`, [_now(), projectId]);
+  }
+
+  // Merged chronological timeline across every contact linked to a project.
+  // excludeContactIds implements the per-contact toggle (Section 7.4) — toggled-off
+  // contacts are simply excluded from the merged query rather than deleted from the project.
+  function getProjectEntries(projectId, { type = null, topicId = null, excludeContactIds = [], limit = 300, offset = 0 } = {}) {
+    let sql = `
+      SELECT e.*, c.first_name AS c_first_name, c.last_name AS c_last_name,
+             c.descriptor AS c_descriptor, c.avatar_color AS c_avatar_color
+      FROM entries e
+      JOIN project_contacts pc ON pc.contact_id = e.contact_id AND pc.project_id = ?
+      JOIN contacts c ON c.id = e.contact_id
+      WHERE 1=1
+    `;
+    const params = [projectId];
+    if (excludeContactIds.length) {
+      sql += ` AND e.contact_id NOT IN (${excludeContactIds.map(() => '?').join(',')})`;
+      params.push(...excludeContactIds);
+    }
+    if (type) { sql += ` AND e.type = ?`; params.push(type); }
+    if (topicId) {
+      sql += ` AND EXISTS (SELECT 1 FROM entry_topics et WHERE et.entry_id = e.id AND et.topic_id = ?)`;
+      params.push(topicId);
+    }
+    sql += ` ORDER BY e.timestamp DESC LIMIT ? OFFSET ?`;
+    params.push(limit, offset);
+    const stmt = _db.prepare(sql);
+    stmt.bind(params);
+    const entries = _rows(stmt);
+    return entries.map(e => ({
+      ...e,
+      topics: _getEntryTopics(e.id),
+      contact: {
+        id: e.contact_id,
+        first_name: e.c_first_name,
+        last_name: e.c_last_name,
+        descriptor: e.c_descriptor,
+        avatar_color: e.c_avatar_color,
+        display_name: _displayName({ first_name: e.c_first_name, last_name: e.c_last_name, descriptor: e.c_descriptor }),
+        initials: _initials({ first_name: e.c_first_name, last_name: e.c_last_name }),
+      },
+    }));
+  }
+
   // ─── Settings ──────────────────────────────────────────────────────────────
 
   function getSetting(key) {
@@ -775,6 +920,10 @@ var TL_DB = (function() {
     // Reminders
     getReminders, getDueReminders, getCallReminders,
     createReminder, markReminderDone, deleteReminder,
+    // Projects
+    getProjects, getProject, getProjectContacts, getContactProjects,
+    createProject, updateProject, deleteProject,
+    addContactToProject, removeContactFromProject, getProjectEntries,
     // Settings
     getSetting, setSetting,
     // Backup
