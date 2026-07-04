@@ -32,6 +32,8 @@ var TL_DB = (function() {
       descriptor  TEXT,
       notes       TEXT,
       avatar_color TEXT DEFAULT 'teal',
+      keep_in_touch_days INTEGER,
+      reconnect_dismissed_at INTEGER,
       created_at  INTEGER NOT NULL,
       updated_at  INTEGER NOT NULL
     );
@@ -407,6 +409,8 @@ var TL_DB = (function() {
   // wrapped so it's a silent no-op once the column already exists.
   function _migrateSchema() {
     try { _db.run(`ALTER TABLE entries ADD COLUMN highlight_color TEXT`); } catch (e) { /* already exists */ }
+    try { _db.run(`ALTER TABLE contacts ADD COLUMN keep_in_touch_days INTEGER`); } catch (e) { /* already exists */ }
+    try { _db.run(`ALTER TABLE contacts ADD COLUMN reconnect_dismissed_at INTEGER`); } catch (e) { /* already exists */ }
   }
 
   function _seedDefaultSettings() {
@@ -479,6 +483,33 @@ var TL_DB = (function() {
     }));
   }
 
+  // ─── Reconnect nudges (Section 10.4) ────────────────────────────────────────
+  // Cadence is opt-in per contact (keep_in_touch_days). "Reference point" for
+  // a contact is the most recent of: last real activity, a dismissed nudge (which
+  // resets the clock without requiring an interaction), or when they were added
+  // (fallback for a contact with a cadence but no activity yet). A contact
+  // surfaces once now - reference exceeds their chosen cadence.
+
+  function getReconnectContacts() {
+    const now = _now();
+    return getContacts()
+      .filter(c => c.keep_in_touch_days)
+      .map(c => {
+        const reference = Math.max(c.last_activity || 0, c.reconnect_dismissed_at || 0, c.created_at || 0);
+        const cadenceMs = c.keep_in_touch_days * 86400000;
+        const overdueDays = Math.floor((now - reference - cadenceMs) / 86400000);
+        return { ...c, reconnect_reference: reference, overdue_days: overdueDays };
+      })
+      .filter(c => c.overdue_days >= 0)
+      .sort((a, b) => b.overdue_days - a.overdue_days);
+  }
+
+  // Resets the clock without logging an interaction — the person said "I know,
+  // I'll get to them" and doesn't want to be nagged again immediately.
+  function dismissReconnect(contactId) {
+    _run(`UPDATE contacts SET reconnect_dismissed_at = ? WHERE id = ?`, [_now(), contactId]);
+  }
+
   function getContact(id) {
     const stmt = _db.prepare(`SELECT * FROM contacts WHERE id = ?`);
     stmt.bind([id]);
@@ -508,7 +539,7 @@ var TL_DB = (function() {
   }
 
   function updateContact(id, fields) {
-    const allowed = ['first_name','last_name','descriptor','notes','avatar_color'];
+    const allowed = ['first_name','last_name','descriptor','notes','avatar_color','keep_in_touch_days'];
     const sets = allowed.filter(f => fields[f] !== undefined).map(f => `${f} = ?`);
     const vals = allowed.filter(f => fields[f] !== undefined).map(f => fields[f]);
     if (!sets.length) return;
@@ -990,6 +1021,7 @@ var TL_DB = (function() {
     // Contacts
     getContacts, getContact, createContact, updateContact, deleteContact,
     searchContacts, searchContactsAndEntries, getContactPhones, getContactEmails,
+    getReconnectContacts, dismissReconnect,
     findContactByPhone, findContactByEmail,
     // Topics
     getContactTopics, createTopic,

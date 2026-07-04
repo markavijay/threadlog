@@ -584,6 +584,25 @@ const TL_CONTACTS = (() => {
           </div>
         </div>
 
+        <div class="form-section-label" style="margin-top:8px">Keep in touch</div>
+        <div style="font-size:12px;color:var(--text-tertiary);margin:-2px 0 8px">
+          Get a gentle nudge if you haven't logged any activity with ${TL_APP._esc(contact.first_name)} for a while. Off by default.
+        </div>
+        <div class="dir-toggle" id="ec-cadence-toggle">
+          <div class="dir-btn${!contact.keep_in_touch_days ? ' active' : ''}" data-days="">Off</div>
+          <div class="dir-btn${contact.keep_in_touch_days === 14 ? ' active' : ''}" data-days="14">2 weeks</div>
+          <div class="dir-btn${contact.keep_in_touch_days === 30 ? ' active' : ''}" data-days="30">Monthly</div>
+          <div class="dir-btn${contact.keep_in_touch_days === 90 ? ' active' : ''}" data-days="90">Quarterly</div>
+          <div class="dir-btn${contact.keep_in_touch_days && ![14,30,90].includes(contact.keep_in_touch_days) ? ' active' : ''}" data-days="custom">Custom</div>
+        </div>
+        <div class="form-field" id="ec-cadence-custom-row" style="margin-top:8px;display:${contact.keep_in_touch_days && ![14,30,90].includes(contact.keep_in_touch_days) ? 'flex' : 'none'}">
+          <i class="ti ti-calendar-time form-field-icon"></i>
+          <div class="form-field-inner">
+            <input type="number" min="1" id="ec-cadence-custom-days" class="form-input" placeholder="Days between check-ins"
+              value="${contact.keep_in_touch_days && ![14,30,90].includes(contact.keep_in_touch_days) ? contact.keep_in_touch_days : ''}" />
+          </div>
+        </div>
+
         <div style="height:8px"></div>
         <button onclick="TL_CONTACTS.deleteContact(${contact.id})"
           style="width:100%;padding:11px;border-radius:var(--radius-lg);background:none;border:1px solid #F09595;color:#A32D2D;font-size:14px;font-weight:500;cursor:pointer;font-family:var(--font)">
@@ -658,17 +677,42 @@ const TL_CONTACTS = (() => {
       document.getElementById('ec-new-topic-row').style.display = 'none';
     });
 
+    // Keep-in-touch cadence
+    document.getElementById('ec-cadence-toggle').addEventListener('click', e => {
+      const btn = e.target.closest('.dir-btn');
+      if (!btn) return;
+      document.querySelectorAll('#ec-cadence-toggle .dir-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const customRow = document.getElementById('ec-cadence-custom-row');
+      if (btn.dataset.days === 'custom') {
+        customRow.style.display = 'flex';
+        document.getElementById('ec-cadence-custom-days').focus();
+      } else {
+        customRow.style.display = 'none';
+      }
+    });
+
     // Save
     document.getElementById('ec-save').addEventListener('click', () => {
       const first = document.getElementById('ec-first').value.trim();
       if (!first) { document.getElementById('ec-first').focus(); return; }
 
       // Update basic fields
+      const cadenceBtn = document.querySelector('#ec-cadence-toggle .dir-btn.active');
+      let keepInTouchDays = null;
+      if (cadenceBtn && cadenceBtn.dataset.days === 'custom') {
+        const customVal = parseInt(document.getElementById('ec-cadence-custom-days').value, 10);
+        keepInTouchDays = (customVal > 0) ? customVal : null;
+      } else if (cadenceBtn && cadenceBtn.dataset.days) {
+        keepInTouchDays = parseInt(cadenceBtn.dataset.days, 10);
+      }
+
       TL_DB.updateContact(contact.id, {
         first_name: first,
         last_name: document.getElementById('ec-last').value.trim(),
         descriptor: document.getElementById('ec-descriptor').value.trim(),
         notes: document.getElementById('ec-notes').value.trim(),
+        keep_in_touch_days: keepInTouchDays,
       });
 
       // Update phones — delete all and re-insert

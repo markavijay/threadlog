@@ -29,6 +29,7 @@ const TL_APP = (() => {
       _wireQuickAdd();
       _wireSearch();
       TL_PROJECTS.init();
+      TL_RECONNECT.init();
       _checkUrlParams();
       TL_CONTACTS.render();
       // If contacts list is empty after Google redirect, DB may need a moment
@@ -37,6 +38,7 @@ const TL_APP = (() => {
       TL_SYNC.startAutoSync();
       _hideLoader();
       _checkFolderReconnect();
+      _refreshReconnectBadge();
     } catch (err) {
       console.error('[App] Boot failed:', err);
       document.getElementById('loading-screen').innerHTML = `
@@ -153,6 +155,15 @@ const TL_APP = (() => {
   function showView(id) {
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
     document.getElementById(id).classList.add('active');
+    _refreshReconnectBadge();
+  }
+
+  // Quiet dot indicator — Section 10.4 design principle: gentle, never a nagging count.
+  function _refreshReconnectBadge() {
+    const badge = document.getElementById('reconnect-badge');
+    if (!badge) return;
+    const hasOverdue = TL_DB.getReconnectContacts().length > 0;
+    badge.style.display = hasOverdue ? 'block' : 'none';
   }
 
   function openContact(contactId) {
@@ -245,6 +256,12 @@ const TL_APP = (() => {
       _currentContact = null;
       TL_PROJECTS.render();
       showView('view-projects');
+    });
+
+    document.getElementById('btn-reconnect-global').addEventListener('click', () => {
+      _currentContact = null;
+      TL_RECONNECT.render();
+      showView('view-reconnect');
     });
 
     document.getElementById('btn-add-reminder').addEventListener('click', () => {

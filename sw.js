@@ -3,7 +3,7 @@
  * Strategy: Cache-first for app shell, network-first for data/API calls
  */
 
-const CACHE_NAME = 'threadlog-v2';
+const CACHE_NAME = 'threadlog-v3';
 const DATA_CACHE_NAME = 'threadlog-data-v1';
 
 // App shell files — cached on install, served from cache always
@@ -14,6 +14,7 @@ const APP_SHELL = [
   '/js/contacts.js',
   '/js/timeline.js',
   '/js/projects.js',
+  '/js/reconnect.js',
   '/js/reminders.js',
   '/js/sync.js',
   '/js/sheets.js',

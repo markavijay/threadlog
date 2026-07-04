@@ -507,6 +507,10 @@
     <div class="topbar">
       <span class="topbar-title">ThreadLog</span>
       <button class="icon-btn" id="btn-projects-global" title="Projects"><i class="ti ti-folders"></i></button>
+      <button class="icon-btn" id="btn-reconnect-global" title="Reconnect" style="position:relative">
+        <i class="ti ti-heart-handshake"></i>
+        <span id="reconnect-badge" style="display:none;position:absolute;top:6px;right:6px;width:7px;height:7px;border-radius:50%;background:#E24B4A"></span>
+      </button>
       <button class="icon-btn" id="btn-reminders-global" title="Reminders"><i class="ti ti-bell"></i></button>
       <button class="icon-btn" id="btn-settings" title="Settings"><i class="ti ti-settings"></i></button>
     </div>
@@ -589,6 +593,17 @@
     </button>
   </div>
 
+  <!-- ── View: Reconnect (Section 10.4 proactive nudges) ─────────────────── -->
+  <div class="view" id="view-reconnect">
+    <div class="topbar">
+      <button class="icon-btn back-btn" id="btn-back-reconnect"><i class="ti ti-arrow-left"></i></button>
+      <span class="topbar-title">Reconnect</span>
+    </div>
+    <div id="reconnect-list">
+      <!-- Populated by JS -->
+    </div>
+  </div>
+
   <!-- ── View: Project Detail (merged timeline) ──────────────────────────── -->
   <div class="view" id="view-project-detail">
     <div class="contact-header">
@@ -658,6 +673,7 @@
 <script src="js/contacts.js"></script>
 <script src="js/timeline.js"></script>
 <script src="js/projects.js"></script>
+<script src="js/reconnect.js"></script>
 <script src="js/reminders.js"></script>
 <script src="js/sync.js"></script>
 <script src="js/sheets.js"></script>
