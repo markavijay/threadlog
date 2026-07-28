@@ -27,6 +27,7 @@ var TL_DB = (function() {
 
     CREATE TABLE IF NOT EXISTS contacts (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      global_id   TEXT,
       first_name  TEXT NOT NULL,
       last_name   TEXT,
       descriptor  TEXT,
@@ -61,6 +62,7 @@ var TL_DB = (function() {
 
     CREATE TABLE IF NOT EXISTS entries (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      global_id   TEXT,
       contact_id  INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
       type        TEXT NOT NULL CHECK(type IN ('call','sms','email','meet','wa','doc','note')),
       direction   TEXT CHECK(direction IN ('in','out','missed','none')),
@@ -113,6 +115,7 @@ var TL_DB = (function() {
 
     CREATE TABLE IF NOT EXISTS projects (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      global_id   TEXT,
       name        TEXT NOT NULL,
       description TEXT,
       status      TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','on_hold','closed')),
@@ -174,6 +177,8 @@ var TL_DB = (function() {
     // Save before page unload
     window.addEventListener('beforeunload', () => { if (_dirty) _persistSync(); });
 
+    if (_usingFileSystem && window.TL_EVENTLOG) await TL_EVENTLOG.onFolderReady();
+
     return true;
   }
 
@@ -197,9 +202,11 @@ var TL_DB = (function() {
     if (existing && existing.byteLength > 0) {
       _db = new _SQL.Database(existing);
       _db.run(SCHEMA); // ensure schema is current
+      _migrateSchema();
     } else {
       await _persist();
     }
+    if (window.TL_EVENTLOG) await TL_EVENTLOG.onFolderReady();
     return true;
   }
 
@@ -251,7 +258,9 @@ var TL_DB = (function() {
       if (data && data.byteLength > 0) {
         _db = new _SQL.Database(data);
         _db.run(SCHEMA);
+        _migrateSchema();
       }
+      if (window.TL_EVENTLOG) await TL_EVENTLOG.onFolderReady();
       return true;
     } catch (e) {
       console.warn('[DB] Reconnect with prompt failed:', e);
@@ -411,6 +420,39 @@ var TL_DB = (function() {
     try { _db.run(`ALTER TABLE entries ADD COLUMN highlight_color TEXT`); } catch (e) { /* already exists */ }
     try { _db.run(`ALTER TABLE contacts ADD COLUMN keep_in_touch_days INTEGER`); } catch (e) { /* already exists */ }
     try { _db.run(`ALTER TABLE contacts ADD COLUMN reconnect_dismissed_at INTEGER`); } catch (e) { /* already exists */ }
+
+    // Sync engine (Resilio event log) support — additive, safe to run on every boot.
+    try { _db.run(`ALTER TABLE contacts ADD COLUMN global_id TEXT`); } catch (e) { /* already exists */ }
+    try { _db.run(`ALTER TABLE entries ADD COLUMN global_id TEXT`); } catch (e) { /* already exists */ }
+    try { _db.run(`ALTER TABLE projects ADD COLUMN global_id TEXT`); } catch (e) { /* already exists */ }
+
+    // Backfill: any row created before the sync engine existed has no global_id yet.
+    // Give every such row a stable id now, once, so it can be referenced by future events.
+    ['contacts', 'entries', 'projects'].forEach(table => {
+      const stmt = _db.prepare(`SELECT id FROM ${table} WHERE global_id IS NULL`);
+      const ids = _rows(stmt).map(r => r.id);
+      ids.forEach(id => {
+        _db.run(`UPDATE ${table} SET global_id = ? WHERE id = ?`, [_uuid(), id]);
+      });
+    });
+
+    try { _db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_global ON contacts(global_id)`); } catch (e) {}
+    try { _db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_entries_global  ON entries(global_id)`); } catch (e) {}
+    try { _db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_global ON projects(global_id)`); } catch (e) {}
+  }
+
+  function _uuid() {
+    return (crypto.randomUUID ? crypto.randomUUID() :
+      'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+        const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+      }));
+  }
+
+  function _globalIdOf(table, id) {
+    const stmt = _db.prepare(`SELECT global_id FROM ${table} WHERE id = ?`);
+    stmt.bind([id]);
+    return _first(stmt)?.global_id || null;
   }
 
   function _seedDefaultSettings() {
@@ -527,14 +569,19 @@ var TL_DB = (function() {
 
   function createContact({ first_name, last_name = '', descriptor = '', notes = '', avatar_color = 'teal', phones = [], emails = [], topics = [] }) {
     const now = _now();
+    const globalId = _uuid();
     const id = _run(
-      `INSERT INTO contacts(first_name, last_name, descriptor, notes, avatar_color, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [first_name, last_name, descriptor, notes, avatar_color, now, now]
+      `INSERT INTO contacts(global_id, first_name, last_name, descriptor, notes, avatar_color, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [globalId, first_name, last_name, descriptor, notes, avatar_color, now, now]
     );
     phones.forEach(p => _run(`INSERT INTO contact_phones(contact_id, type, number) VALUES(?,?,?)`, [id, p.type, p.number]));
     emails.forEach(e => _run(`INSERT INTO contact_emails(contact_id, email) VALUES(?,?)`, [id, e]));
     topics.forEach(t => createTopic(id, t));
+    if (window.TL_EVENTLOG) TL_EVENTLOG.emit('contact.created', {
+      globalId, first_name, last_name, descriptor, notes, avatar_color,
+      phones, emails, topics,
+    }, now);
     return id;
   }
 
@@ -543,11 +590,37 @@ var TL_DB = (function() {
     const sets = allowed.filter(f => fields[f] !== undefined).map(f => `${f} = ?`);
     const vals = allowed.filter(f => fields[f] !== undefined).map(f => fields[f]);
     if (!sets.length) return;
-    _run(`UPDATE contacts SET ${sets.join(', ')}, updated_at = ? WHERE id = ?`, [...vals, _now(), id]);
+    const now = _now();
+    _run(`UPDATE contacts SET ${sets.join(', ')}, updated_at = ? WHERE id = ?`, [...vals, now, id]);
+    if (window.TL_EVENTLOG) {
+      const globalId = _globalIdOf('contacts', id);
+      const changed = {};
+      allowed.filter(f => fields[f] !== undefined).forEach(f => changed[f] = fields[f]);
+      if (globalId) TL_EVENTLOG.emit('contact.updated', { globalId, ...changed }, now);
+    }
+  }
+
+  // Full replace of a contact's phones/emails — used by the contact edit sheet
+  // (which always deletes-and-reinserts the whole set). Kept as one function so
+  // the sync event carries the complete new list, matching how it's edited.
+  function setContactPhonesEmails(id, phones = [], emails = []) {
+    _db.run(`DELETE FROM contact_phones WHERE contact_id = ?`, [id]);
+    phones.forEach(p => _db.run(`INSERT INTO contact_phones(contact_id,type,number) VALUES(?,?,?)`, [id, p.type, p.number]));
+    _db.run(`DELETE FROM contact_emails WHERE contact_id = ?`, [id]);
+    emails.forEach(e => _db.run(`INSERT INTO contact_emails(contact_id,email) VALUES(?,?)`, [id, e]));
+    _dirty = true;
+    const now = _now();
+    _run(`UPDATE contacts SET updated_at = ? WHERE id = ?`, [now, id]);
+    if (window.TL_EVENTLOG) {
+      const globalId = _globalIdOf('contacts', id);
+      if (globalId) TL_EVENTLOG.emit('contact.updated', { globalId, phones, emails }, now);
+    }
   }
 
   function deleteContact(id) {
+    const globalId = _globalIdOf('contacts', id);
     _run(`DELETE FROM contacts WHERE id = ?`, [id]);
+    if (window.TL_EVENTLOG && globalId) TL_EVENTLOG.emit('contact.deleted', { globalId }, _now());
   }
 
   function searchContacts(q) {
@@ -722,10 +795,12 @@ var TL_DB = (function() {
 
   function createEntry({ contact_id, type, direction = 'none', timestamp, duration_s, subject, body, doc_name, doc_url, doc_type, location, auto_captured = 0, source_id, topic_names = [] }) {
     const now = _now();
+    const globalId = _uuid();
+    const ts = timestamp || now;
     const id = _run(
-      `INSERT INTO entries(contact_id, type, direction, timestamp, duration_s, subject, body, doc_name, doc_url, doc_type, location, auto_captured, source_id, created_at, updated_at)
-       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [contact_id, type, direction, timestamp || now, duration_s, subject, body, doc_name, doc_url, doc_type, location, auto_captured ? 1 : 0, source_id, now, now]
+      `INSERT INTO entries(global_id, contact_id, type, direction, timestamp, duration_s, subject, body, doc_name, doc_url, doc_type, location, auto_captured, source_id, created_at, updated_at)
+       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [globalId, contact_id, type, direction, ts, duration_s, subject, body, doc_name, doc_url, doc_type, location, auto_captured ? 1 : 0, source_id, now, now]
     );
     topic_names.forEach(name => {
       const topicId = createTopic(contact_id, name);
@@ -736,6 +811,13 @@ var TL_DB = (function() {
     });
     // Update contact's updated_at
     _run(`UPDATE contacts SET updated_at = ? WHERE id = ?`, [now, contact_id]);
+    if (window.TL_EVENTLOG) {
+      const contactGlobalId = _globalIdOf('contacts', contact_id);
+      if (contactGlobalId) TL_EVENTLOG.emit('entry.created', {
+        globalId, contactGlobalId, type, direction, timestamp: ts, duration_s, subject, body,
+        doc_name, doc_url, doc_type, location, auto_captured: auto_captured ? 1 : 0, source_id, topic_names,
+      }, now);
+    }
     return id;
   }
 
@@ -743,7 +825,8 @@ var TL_DB = (function() {
     const allowed = ['direction','timestamp','duration_s','subject','body','doc_name','doc_url','doc_type','location','highlight_color'];
     const sets = allowed.filter(f => fields[f] !== undefined).map(f => `${f} = ?`);
     const vals = allowed.filter(f => fields[f] !== undefined).map(f => fields[f]);
-    if (sets.length) _run(`UPDATE entries SET ${sets.join(', ')}, updated_at = ? WHERE id = ?`, [...vals, _now(), id]);
+    const now = _now();
+    if (sets.length) _run(`UPDATE entries SET ${sets.join(', ')}, updated_at = ? WHERE id = ?`, [...vals, now, id]);
     if (fields.topic_names) {
       const _stmt = _db.prepare(`SELECT contact_id FROM entries WHERE id = ?`);
       _stmt.bind([id]);
@@ -759,15 +842,29 @@ var TL_DB = (function() {
         });
       }
     }
+    if (window.TL_EVENTLOG) {
+      const globalId = _globalIdOf('entries', id);
+      const changed = {};
+      allowed.filter(f => fields[f] !== undefined).forEach(f => changed[f] = fields[f]);
+      if (fields.topic_names) changed.topic_names = fields.topic_names;
+      if (globalId && Object.keys(changed).length) TL_EVENTLOG.emit('entry.updated', { globalId, ...changed }, now);
+    }
   }
 
   function deleteEntry(id) {
+    const globalId = _globalIdOf('entries', id);
     _run(`DELETE FROM entries WHERE id = ?`, [id]);
+    if (window.TL_EVENTLOG && globalId) TL_EVENTLOG.emit('entry.deleted', { globalId }, _now());
   }
 
   // color: one of 'red'|'amber'|'green'|'blue'|'purple', or null to clear.
   function setEntryHighlight(id, color) {
-    _run(`UPDATE entries SET highlight_color = ?, updated_at = ? WHERE id = ?`, [color || null, _now(), id]);
+    const now = _now();
+    _run(`UPDATE entries SET highlight_color = ?, updated_at = ? WHERE id = ?`, [color || null, now, id]);
+    if (window.TL_EVENTLOG) {
+      const globalId = _globalIdOf('entries', id);
+      if (globalId) TL_EVENTLOG.emit('entry.updated', { globalId, highlight_color: color || null }, now);
+    }
   }
 
   function entryExistsBySourceId(sourceId) {
@@ -899,10 +996,12 @@ var TL_DB = (function() {
 
   function createProject({ name, description = '', status = 'active', contact_ids = [] }) {
     const now = _now();
+    const globalId = _uuid();
     const id = _run(
-      `INSERT INTO projects(name, description, status, created_at, updated_at) VALUES(?,?,?,?,?)`,
-      [name, description, status, now, now]
+      `INSERT INTO projects(global_id, name, description, status, created_at, updated_at) VALUES(?,?,?,?,?,?)`,
+      [globalId, name, description, status, now, now]
     );
+    if (window.TL_EVENTLOG) TL_EVENTLOG.emit('project.created', { globalId, name, description, status }, now);
     contact_ids.forEach(cid => addContactToProject(id, cid));
     return id;
   }
@@ -912,23 +1011,44 @@ var TL_DB = (function() {
     const sets = allowed.filter(f => fields[f] !== undefined).map(f => `${f} = ?`);
     const vals = allowed.filter(f => fields[f] !== undefined).map(f => fields[f]);
     if (!sets.length) return;
-    _run(`UPDATE projects SET ${sets.join(', ')}, updated_at = ? WHERE id = ?`, [...vals, _now(), id]);
+    const now = _now();
+    _run(`UPDATE projects SET ${sets.join(', ')}, updated_at = ? WHERE id = ?`, [...vals, now, id]);
+    if (window.TL_EVENTLOG) {
+      const globalId = _globalIdOf('projects', id);
+      const changed = {};
+      allowed.filter(f => fields[f] !== undefined).forEach(f => changed[f] = fields[f]);
+      if (globalId) TL_EVENTLOG.emit('project.updated', { globalId, ...changed }, now);
+    }
   }
 
   function deleteProject(id) {
+    const globalId = _globalIdOf('projects', id);
     _run(`DELETE FROM projects WHERE id = ?`, [id]);
+    if (window.TL_EVENTLOG && globalId) TL_EVENTLOG.emit('project.deleted', { globalId }, _now());
   }
 
   function addContactToProject(projectId, contactId) {
     try {
       _run(`INSERT OR IGNORE INTO project_contacts(project_id, contact_id, added_at) VALUES(?,?,?)`, [projectId, contactId, _now()]);
     } catch (e) { /* already linked */ }
-    _run(`UPDATE projects SET updated_at = ? WHERE id = ?`, [_now(), projectId]);
+    const now = _now();
+    _run(`UPDATE projects SET updated_at = ? WHERE id = ?`, [now, projectId]);
+    if (window.TL_EVENTLOG) {
+      const projectGlobalId = _globalIdOf('projects', projectId);
+      const contactGlobalId = _globalIdOf('contacts', contactId);
+      if (projectGlobalId && contactGlobalId) TL_EVENTLOG.emit('project.contact_added', { projectGlobalId, contactGlobalId }, now);
+    }
   }
 
   function removeContactFromProject(projectId, contactId) {
+    const projectGlobalId = _globalIdOf('projects', projectId);
+    const contactGlobalId = _globalIdOf('contacts', contactId);
     _run(`DELETE FROM project_contacts WHERE project_id = ? AND contact_id = ?`, [projectId, contactId]);
-    _run(`UPDATE projects SET updated_at = ? WHERE id = ?`, [_now(), projectId]);
+    const now = _now();
+    _run(`UPDATE projects SET updated_at = ? WHERE id = ?`, [now, projectId]);
+    if (window.TL_EVENTLOG && projectGlobalId && contactGlobalId) {
+      TL_EVENTLOG.emit('project.contact_removed', { projectGlobalId, contactGlobalId }, now);
+    }
   }
 
   // Merged chronological timeline across every contact linked to a project.
@@ -1018,8 +1138,9 @@ var TL_DB = (function() {
     // Folder connection (File System Access API)
     connectFolder, reconnectFolderWithPrompt,
     isUsingFileSystem, isFileSystemSupported, getConnectedFolderName, hadPreviousFolder,
+    getDirHandle: () => _dirHandle,
     // Contacts
-    getContacts, getContact, createContact, updateContact, deleteContact,
+    getContacts, getContact, createContact, updateContact, deleteContact, setContactPhonesEmails,
     searchContacts, searchContactsAndEntries, getContactPhones, getContactEmails,
     getReconnectContacts, dismissReconnect,
     findContactByPhone, findContactByEmail,

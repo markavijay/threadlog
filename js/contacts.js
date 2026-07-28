@@ -715,24 +715,22 @@ const TL_CONTACTS = (() => {
         keep_in_touch_days: keepInTouchDays,
       });
 
-      // Update phones — delete all and re-insert
-      TL_DB._db()?.run(`DELETE FROM contact_phones WHERE contact_id = ?`, [contact.id]);
+      // Update phones and emails — collect the full new set, then replace as one
+      // operation so it's captured correctly in the sync event log.
+      const newPhones = [];
       document.querySelectorAll('#ec-phones .phone-row').forEach(row => {
         const type = row.querySelector('.phone-type-select')?.value;
         const number = row.querySelector('.phone-input')?.value.trim();
-        if (number) TL_DB._db()?.run(`INSERT INTO contact_phones(contact_id,type,number) VALUES(?,?,?)`, [contact.id, type, number]);
+        if (number) newPhones.push({ type, number });
       });
 
-      // Update emails — delete all and re-insert
-      TL_DB._db()?.run(`DELETE FROM contact_emails WHERE contact_id = ?`, [contact.id]);
       const newEmails = [];
       document.querySelectorAll('#ec-emails .ec-email-input').forEach(inp => {
         const val = inp.value.trim();
-        if (val) {
-          TL_DB._db()?.run(`INSERT INTO contact_emails(contact_id,email) VALUES(?,?)`, [contact.id, val]);
-          newEmails.push(val);
-        }
+        if (val) newEmails.push(val);
       });
+
+      TL_DB.setContactPhonesEmails(contact.id, newPhones, newEmails);
 
       // Topics
       document.querySelectorAll('#ec-topics .topic-picker-chip.active').forEach(chip => {
