@@ -60,11 +60,11 @@ const TL_EVENTLOG = (() => {
   function emit(type, payload, at) {
     if (!_dirHandle) return; // no folder connected yet — local-only for now, nothing to sync
     const event = {
+      ...payload,
       id: `evt_${_uuid()}`,
       device: _ensureDeviceId(),
       at: new Date(at || Date.now()).toISOString(),
       type,
-      ...payload,
     };
     _ownLines.push(JSON.stringify(event));
     _queueWriteOwnLog(); // queued, not fire-and-forget — see below
@@ -158,7 +158,7 @@ const TL_EVENTLOG = (() => {
       `, [e.id]).map(t => t.name);
       emit('entry.created', {
         globalId: e.global_id, contactGlobalId: contactGlobalById[e.contact_id],
-        type: e.type, direction: e.direction, timestamp: e.timestamp, duration_s: e.duration_s,
+        entry_type: e.type, direction: e.direction, timestamp: e.timestamp, duration_s: e.duration_s,
         subject: e.subject, body: e.body, doc_name: e.doc_name, doc_url: e.doc_url, doc_type: e.doc_type,
         location: e.location, auto_captured: e.auto_captured, source_id: e.source_id, topic_names,
       }, e.created_at);
@@ -298,7 +298,7 @@ const TL_EVENTLOG = (() => {
     const now = Date.parse(e.at) || Date.now();
     _run(db, `INSERT INTO entries(global_id, contact_id, type, direction, timestamp, duration_s, subject, body, doc_name, doc_url, doc_type, location, auto_captured, source_id, created_at, updated_at)
                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [e.globalId, contactId, e.type, e.direction || 'none', e.timestamp || now, e.duration_s ?? null,
+      [e.globalId, contactId, e.entry_type, e.direction || 'none', e.timestamp || now, e.duration_s ?? null,
        e.subject ?? null, e.body ?? null, e.doc_name ?? null, e.doc_url ?? null, e.doc_type ?? null,
        e.location ?? null, e.auto_captured ? 1 : 0, e.source_id ?? null, now, now]);
     const id = _localId(db, 'entries', e.globalId);

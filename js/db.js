@@ -814,7 +814,7 @@ var TL_DB = (function() {
     if (window.TL_EVENTLOG) {
       const contactGlobalId = _globalIdOf('contacts', contact_id);
       if (contactGlobalId) TL_EVENTLOG.emit('entry.created', {
-        globalId, contactGlobalId, type, direction, timestamp: ts, duration_s, subject, body,
+        globalId, contactGlobalId, entry_type: type, direction, timestamp: ts, duration_s, subject, body,
         doc_name, doc_url, doc_type, location, auto_captured: auto_captured ? 1 : 0, source_id, topic_names,
       }, now);
     }
