@@ -478,6 +478,58 @@
       background: var(--tl-accent); border-color: var(--tl-accent); color: #fff;
     }
 
+    /* ── Desktop / wide screens ───────────────────────────────────────────── */
+    @media (min-width: 900px) {
+      body { background: var(--bg-secondary); }
+
+      #app {
+        max-width: 1100px;
+        height: 100vh;
+        margin: 0 auto;
+        box-shadow: 0 0 0 1px var(--border);
+        background: var(--bg);
+      }
+
+      /* Give the topbar/search a bit more breathing room instead of
+         stretching edge-to-edge on a 1100px-wide shell. */
+      .topbar, .search-wrap, .contact-header { padding-left: 32px; padding-right: 32px; }
+
+      /* Contact list becomes a responsive grid instead of one long
+         phone-style stack, so wide screens actually show more contacts
+         at a glance instead of a single skinny column. */
+      .contact-list {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+        gap: 2px 16px;
+        padding: 8px 32px 24px;
+        align-content: start;
+      }
+      .contact-list .list-section-label { grid-column: 1 / -1; padding-left: 0; }
+      .contact-row { border-radius: var(--radius-md); border-bottom: none; padding: 10px 12px; }
+      .contact-row:hover { background: var(--bg-secondary); }
+
+      /* Timeline entries stay a comfortably readable line-length rather
+         than stretching to 1100px wide, but get more breathing room. */
+      .timeline { padding: 20px 32px 80px; }
+      .tl-card { max-width: 720px; }
+      .quick-add { padding-left: 32px; padding-right: 32px; }
+      .quick-add .qa-btn { flex: 0 1 120px; }
+
+      .filter-scroll, .topic-scroll { padding-left: 32px; padding-right: 32px; }
+
+      /* Sheets/modals stay phone-width for readable forms, but float as
+         a centered card instead of a full-width bottom sheet. */
+      .sheet-overlay { align-items: center; }
+      .sheet {
+        max-width: 460px;
+        border-radius: var(--radius-xl);
+        max-height: 85vh;
+      }
+      .call-reminder-card { max-width: 460px; margin: 0 auto; border-radius: var(--radius-xl); }
+    }
+    
+    
+    
     /* ── Reduced motion ───────────────────────────────────────────────────── */
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
